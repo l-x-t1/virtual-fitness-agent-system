@@ -1,0 +1,1039 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>全民智健 Flow - 多智能体虚拟游戏化健身系统</title>
+  <link rel="stylesheet" href="/static/vendor/leaflet/leaflet.css">
+  <link rel="stylesheet" href="/static/styles.css?v=20260604-themed-confirm">
+</head>
+<body class="auth-required">
+  <aside class="side-rail">
+    <a class="brand" href="#home" aria-label="全民智健 Flow">
+      <span class="brand-cube">F</span>
+      <strong>FitFlow</strong>
+    </a>
+
+    <nav class="rail-nav" aria-label="主导航">
+      <button class="nav" data-view="dashboard"><span>🏠</span>首页</button>
+      <button class="nav" data-view="game"><span>🎮</span>体感关卡</button>
+      <button class="nav" data-view="venues"><span>📍</span>场馆推荐</button>
+      <button class="nav admin-only" data-view="admin"><span>⌂</span>首页概览</button>
+      <button class="nav admin-only" data-view="adminUsers"><span>👥</span>用户管理</button>
+      <button class="nav admin-only" data-view="adminTraining"><span>▥</span>训练管理</button>
+      <button class="nav admin-only" data-view="adminCourses"><span>⌖</span>课程管理</button>
+      <button class="nav admin-only" data-view="adminEquipment"><span>▣</span>器材与场馆管理</button>
+      <button class="nav admin-only" data-view="adminGames"><span>◇</span>体感关卡管理</button>
+      <button class="nav admin-only" data-view="adminReports"><span>↗</span>数据与报表</button>
+      <button class="nav admin-only" data-view="adminManagers"><span>♙</span>管理员与权限</button>
+      <button class="nav admin-only" data-view="adminSettings"><span>▤</span>系统设置</button>
+      <button class="nav" data-view="report"><span>🏆</span>训练报告</button>
+      <button class="nav active" data-view="profile"><span>👤</span>用户画像</button>
+    </nav>
+
+    <section class="rail-agent">
+      <b>多智能体协同</b>
+      <small>画像 · 动作评估 · 图谱推荐 · 游戏激励 · 报告反馈</small>
+    </section>
+
+    <button class="rail-sign" id="railLoginBtn" type="button">
+      <span>U</span>
+      <b>演示登录</b>
+    </button>
+  </aside>
+
+  <main class="main-stage" id="home">
+    <div class="top-strip">
+      <div class="top-welcome">
+        <h2>欢迎回来，<span id="topUserName">李同学</span> 👋</h2>
+        <p>基于多智能体的虚拟游戏化全民健身智能辅助系统</p>
+      </div>
+      <div class="top-actions">
+        <button class="top-icon-btn" id="notificationBtn" type="button" aria-label="消息通知">🔔<i>0</i></button>
+        <button id="topCameraBtn" class="top-camera-btn" type="button">启动 MediaPipe</button>
+        <button class="top-user-chip" id="topUserChip" type="button">
+          <img src="/static/assets/user-avatar.png" alt="用户头像">
+          <b id="topUserNick">李同学</b>
+          <span>⌄</span>
+        </button>
+      </div>
+    </div>
+
+    <section id="dashboard" class="view">
+      <section class="poster-hero">
+        <img src="/static/assets/home-hero-poster.png" alt="全民健身进入虚拟关卡">
+        <div class="poster-content">
+          <button class="poster-hotspot" id="heroStartBtn" type="button" aria-label="启动训练"></button>
+        </div>
+      </section>
+
+      <section class="game-lobby" id="gameLobby">
+        <div class="section-title">
+          <span>Play Flow</span>
+          <h2>符合项目文档的虚拟健身关卡</h2>
+        </div>
+        <div class="game-cards">
+          <article class="game-card active" data-exercise="拳击挥击">
+            <span>🥊</span>
+            <h3>能量拳击</h3>
+            <p>识别左右抬手与挥击，映射为虚拟攻击行为，训练上肢协调和心肺节奏。</p>
+          </article>
+          <article class="game-card" data-exercise="深蹲">
+            <span>🦵</span>
+            <h3>深蹲校准</h3>
+            <p>用膝髋角度、躯干稳定度生成动作标准度评分，触发纠错建议。</p>
+          </article>
+          <article class="game-card" data-exercise="开合跳">
+            <span>⚡</span>
+            <h3>节奏冲刺</h3>
+            <p>把开合跳与有氧节奏转成虚拟赛道目标，提升坚持意愿和参与感。</p>
+          </article>
+          <article class="game-card" data-exercise="动态拉伸">
+            <span>🌿</span>
+            <h3>森林拉伸</h3>
+            <p>面向低强度用户和新手，结合动作幅度、安全提示与恢复建议。</p>
+          </article>
+        </div>
+      </section>
+
+      <section class="dashboard-grid">
+        <article class="panel profile-summary">
+          <span class="eyebrow">Profile Agent</span>
+          <h2 id="welcome">登录后生成个性化训练方案</h2>
+          <p id="profileSummary">系统将根据年龄、体能水平、伤病史、运动偏好与当前位置，推荐关卡、动作和场馆。</p>
+          <div class="pipeline">
+            <span>用户画像</span>
+            <span>姿态识别</span>
+            <span>图谱推荐</span>
+            <span>游戏激励</span>
+            <span>报告反馈</span>
+          </div>
+        </article>
+        <article class="panel metric-card">
+          <span>当前等级</span>
+          <strong id="userLevel">1</strong>
+          <small>每 120 积分提升 1 级</small>
+        </article>
+        <article class="panel metric-card warm">
+          <span>累计积分</span>
+          <strong id="userPoints">0</strong>
+          <small>动作标准度越高奖励越多</small>
+        </article>
+      </section>
+
+      <section class="two-column v1-blocks">
+        <article class="panel plan-card">
+          <div class="panel-title">
+            <h3>今日智能训练方案</h3>
+            <span>画像 + 图谱 + 历史表现</span>
+          </div>
+          <div id="todayPlan" class="plan-content empty">登录后生成今日训练方案。</div>
+        </article>
+        <article class="panel">
+          <div class="panel-title">
+            <h3>智能体协同状态</h3>
+            <span>多智能体闭环</span>
+          </div>
+          <div id="agentFlow" class="agent-flow empty">暂无智能体运行状态。</div>
+        </article>
+      </section>
+
+      <section class="two-column">
+        <article class="panel">
+          <div class="panel-title">
+            <h3>今日推荐动作</h3>
+            <span>图谱推荐智能体排序</span>
+          </div>
+          <div id="exerciseList" class="item-list empty">请先登录获取推荐。</div>
+        </article>
+        <article class="panel">
+          <div class="panel-title">
+            <h3>科学健身提示</h3>
+            <span>安全、强度与恢复建议</span>
+          </div>
+          <div id="tipsList" class="item-list empty">暂无提示。</div>
+        </article>
+      </section>
+
+      <section class="panel library-panel">
+        <div class="panel-title">
+          <h3>动作库与评分标准</h3>
+          <span>支撑 MediaPipe 动作评分</span>
+        </div>
+        <div id="exerciseLibrary" class="library-grid empty">正在加载动作库。</div>
+      </section>
+    </section>
+
+    <section id="game" class="view">
+      <section class="training-hub" id="trainingHub">
+        <div class="training-heading">
+          <h1>选择你的锻炼方式</h1>
+          <p>点击一个训练封面，直接进入对应体感关卡开始训练。</p>
+        </div>
+        <div class="training-cover-grid">
+          <article class="training-cover card-blue game-card active" data-exercise="快走">
+            <img src="/static/covers/cover-running.png" alt="跑步训练封面">
+            <div class="training-cover-body">
+              <div class="training-cover-title">
+                <h3>跑步与快走</h3>
+                <span>有氧</span>
+              </div>
+              <p>沿着虚拟步道完成快走和节奏冲刺，训练基础耐力。</p>
+              <button type="button">进入训练</button>
+            </div>
+          </article>
+          <article class="training-cover card-red game-card" data-exercise="拳击挥击">
+            <img src="/static/covers/cover-boxing.png" alt="拳击训练封面">
+            <div class="training-cover-body">
+              <div class="training-cover-title">
+                <h3>拳击与踢击</h3>
+                <span>协调</span>
+              </div>
+              <p>完成左右挥击和下蹲闪避，提升上肢协调与反应速度。</p>
+              <button type="button">进入训练</button>
+            </div>
+          </article>
+          <article class="training-cover card-purple game-card" data-exercise="开合跳">
+            <img src="/static/covers/cover-jumping.png" alt="节奏有氧训练封面">
+            <div class="training-cover-body">
+              <div class="training-cover-title">
+                <h3>节奏有氧</h3>
+                <span>心肺</span>
+              </div>
+              <p>跟随节奏完成开合跳目标，保持连续命中和轻落地。</p>
+              <button type="button">进入训练</button>
+            </div>
+          </article>
+          <article class="training-cover card-green game-card" data-exercise="动态拉伸">
+            <img src="/static/covers/cover-stretch.png" alt="动态拉伸训练封面">
+            <div class="training-cover-body">
+              <div class="training-cover-title">
+                <h3>森林拉伸</h3>
+                <span>柔韧</span>
+              </div>
+              <p>完成肩、髋、踝动态活动度训练，适合作为热身和恢复。</p>
+              <button type="button">进入训练</button>
+            </div>
+          </article>
+          <article class="training-cover card-cyan game-card" data-exercise="平板支撑">
+            <img src="/static/covers/cover-core.png" alt="核心训练封面">
+            <div class="training-cover-body">
+              <div class="training-cover-title">
+                <h3>核心守卫</h3>
+                <span>核心</span>
+              </div>
+              <p>保持身体直线和核心稳定，挑战持续支撑评分。</p>
+              <button type="button">进入训练</button>
+            </div>
+          </article>
+          <article class="training-cover card-gold game-card" data-exercise="深蹲">
+            <img src="/static/covers/cover-squat.png" alt="深蹲训练封面">
+            <div class="training-cover-body">
+              <div class="training-cover-title">
+                <h3>深蹲校准</h3>
+                <span>力量</span>
+              </div>
+              <p>围绕膝髋角度和身体稳定度完成安全力量训练。</p>
+              <button type="button">进入训练</button>
+            </div>
+          </article>
+        </div>
+      </section>
+
+      <section class="play-layout" id="trainingWorkspace" hidden>
+        <article class="panel game-panel">
+          <div class="stage-top">
+            <div>
+              <span class="eyebrow">Body Controller</span>
+              <h2>MediaPipe 体感训练关卡</h2>
+              <p>摄像头识别抬手、挥拳、下蹲和深蹲姿态；也可用键盘演示答辩流程。</p>
+            </div>
+          </div>
+
+          <div class="virtual-stage">
+            <canvas id="gameCanvas" width="1280" height="720" aria-label="虚拟体感健身游戏画面"></canvas>
+            <video id="cameraPreview" autoplay playsinline muted></video>
+          </div>
+
+          <div class="motion-bar">
+            <div><span>动作评分</span><strong id="scoreValue">82</strong></div>
+            <div><span>当前动作</span><strong id="currentAction">待开始</strong></div>
+            <div class="duration-tile">
+              <span>倒计时</span>
+              <input id="durationInput" type="number" min="10" max="300" value="60">
+              <strong id="timeLeft">60</strong>
+            </div>
+            <div class="start-tile">
+              <span>开始开关</span>
+              <button id="startGameBtn" type="button">开始</button>
+            </div>
+            <span id="liveScore" hidden>0</span>
+            <span id="comboValue" hidden>0</span>
+            <span id="poseConfidence" hidden>0%</span>
+            <span id="stabilityScore" hidden>0</span>
+          </div>
+        </article>
+
+        <aside class="panel control-panel">
+          <button id="backToTrainingHub" class="ghost-btn" type="button">返回选择训练</button>
+          <h3>训练控制台</h3>
+          <label for="exerciseSelect">训练动作</label>
+          <select id="exerciseSelect"></select>
+          <label for="scoreInput">手动评分补偿</label>
+          <input id="scoreInput" type="range" min="40" max="100" value="82">
+          <button id="cameraBtn" type="button">启动 MediaPipe 识别</button>
+          <button id="submitSessionBtn" class="primary-btn" type="button">完成关卡结算</button>
+          <div id="poseStatus" class="status">键盘可先演示；摄像头模式使用 MediaPipe Pose Landmarker。</div>
+          <div id="gameResult" class="result">击中蓝色/橙色目标代表左右挥击，越过红色屏障代表下蹲闪避。结算后写入训练报告并刷新推荐。</div>
+        </aside>
+      </section>
+    </section>
+
+    <section id="venues" class="view venue-view">
+      <div class="venue-page-head">
+        <div>
+          <h1>场馆推荐</h1>
+          <p>发现石家庄身边的运动场所，开启你的健康生活</p>
+        </div>
+      </div>
+
+      <section class="venue-hero">
+        <div class="venue-hero-stat">
+          <span class="venue-stat-icon">⌖</span>
+          <small>当前位置</small>
+          <strong id="venueCurrentLocation">石家庄市 · 长安区</strong>
+          <em id="venueLiveStatus">等待定位更新</em>
+        </div>
+        <div class="venue-hero-stat">
+          <span class="venue-stat-icon">☁</span>
+          <strong><span id="venueTemp">23</span>°C</strong>
+          <small id="venueWeather">多云 · AQI 62</small>
+        </div>
+        <div class="venue-hero-stat">
+          <span class="venue-stat-icon">◷</span>
+          <strong id="venueTime">09:45</strong>
+          <small id="venueDate">2026年5月18日 星期一</small>
+        </div>
+        <div class="venue-hero-art" aria-hidden="true">
+          <span></span>
+        </div>
+      </section>
+
+      <section class="venue-map-shell">
+        <div class="venue-map-head">
+          <div>
+            <h2>周边场馆地图</h2>
+            <p>圆点越大表示该区域场馆越多，颜色表示人流密集程度。</p>
+          </div>
+          <div class="venue-map-stats">
+            <span><b id="venueTotalCount">0</b><small>周边场馆</small></span>
+            <span><b id="venueLowCrowdCount">0</b><small>低人流</small></span>
+            <span><b id="venueAverageDensity">0</b><small>平均密度</small></span>
+          </div>
+        </div>
+        <div id="venueMap" class="venue-map"></div>
+        <div class="density-legend">
+          <span><i class="low"></i>人少</span>
+          <span><i class="mid"></i>适中</span>
+          <span><i class="high"></i>拥挤</span>
+        </div>
+      </section>
+
+      <section class="venue-recommend-head">
+        <h2>✦ 附近少人推荐</h2>
+        <div class="venue-tools">
+          <button id="venueSortBtn" type="button">综合推荐⌄</button>
+          <button id="venueFilterBtn" type="button">全部场馆</button>
+        </div>
+      </section>
+
+      <div id="venueList" class="venue-grid empty">正在加载石家庄场馆数据。</div>
+
+      <section class="venue-feature-strip">
+        <span><b>✦ 智能推荐</b><small>基于运动偏好和历史记录</small></span>
+        <span><b>⟳ 实时更新</b><small>天气、空气质量和距离综合评估</small></span>
+        <span><b>▼ 多维筛选</b><small>按距离、类型、设施等维度筛选</small></span>
+      </section>
+    </section>
+
+    <section id="adminUsers" class="view admin-view">
+      <div class="admin-page-head">
+        <div><span class="admin-kicker">User Center</span><h1>用户管理</h1><p>管理用户画像、积分等级和活跃状态。</p></div>
+        <div class="admin-command-bar">
+          <button class="primary-btn" type="button">新增用户</button>
+          <button type="button">搜索用户</button>
+          <button type="button">筛选活跃</button>
+        </div>
+      </div>
+      <section class="admin-workspace-grid">
+        <article class="admin-card active-rank-card">
+          <div class="admin-card-head"><div><h3>用户活跃排行榜</h3><span>动态读取后台用户与训练数据</span></div><button type="button">查看更多</button></div>
+          <div id="adminActiveRanking" class="admin-rank-list"></div>
+        </article>
+        <article class="admin-card">
+          <div class="admin-card-head"><div><h3>用户分层</h3><span>按训练频率和健康风险划分运营人群</span></div></div>
+          <div id="adminUserSegments" class="admin-status-list"></div>
+        </article>
+      </section>
+      <section class="admin-layout admin-user-account-layout">
+        <article class="panel equipment-list-panel">
+          <div class="panel-title"><h3>用户账号</h3><span>查看、重置密码、删除用户账号</span></div>
+          <div id="adminUserTable" class="admin-table empty">正在加载用户账号数据。</div>
+        </article>
+      </section>
+    </section>
+
+    <section id="adminTraining" class="view admin-view">
+      <div class="admin-page-head">
+        <div><span class="admin-kicker">Training Ops</span><h1>训练管理</h1><p>查看训练趋势、训练类型和近期训练记录。</p></div>
+        <div class="admin-command-bar"><button class="primary-btn" type="button">查看趋势</button><button type="button">异常提醒</button></div>
+      </div>
+      <section class="admin-analytics-grid">
+        <article class="admin-card trend-card"><div class="admin-card-head"><div><h3>训练统计趋势图</h3><span>近 7 日趋势</span></div><button type="button">近7天⌄</button></div><div id="adminTrainingTrend" class="admin-trend-chart"></div></article>
+        <article class="admin-card training-type-card"><div class="admin-card-head"><div><h3>训练数据概览</h3><span>按类型分布</span></div></div><div id="adminTrainingTypes" class="admin-type-chart"></div></article>
+      </section>
+      <section class="admin-workspace-grid admin-recent-training-shell">
+        <article class="admin-card admin-wide-card recent-record-card"><div class="admin-card-head"><div><h3>近期训练记录</h3><span>sessions 联表数据</span></div></div><div id="adminRecentTraining" class="admin-recent-table"></div></article>
+      </section>
+    </section>
+
+    <section id="adminCourses" class="view admin-view">
+      <div class="admin-page-head">
+        <div><span class="admin-kicker">Course Ops</span><h1>课程管理</h1><p>新增和编辑课程会写入 exercises 表。</p></div>
+        <div class="admin-command-bar"><button class="primary-btn" type="button">新增课程</button></div>
+      </div>
+      <section class="admin-workspace-grid admin-course-shell">
+        <article class="admin-card admin-wide-card">
+          <div class="admin-card-head">
+            <div><h3>课程列表</h3><span>来自 exercises 表的课程、难度、目标和器材</span></div>
+            <button type="button">新增课程</button>
+          </div>
+          <div id="adminCourseList" class="admin-course-grid"></div>
+        </article>
+      </section>
+    </section>
+
+    <section id="adminEquipment" class="view admin-view">
+      <div class="admin-page-head">
+        <div><span class="admin-kicker">Equipment & Venue Ops</span><h1>器材与场馆管理</h1><p>分别维护场馆和器材台账、地图密度和维护状态。</p></div>
+        <div class="admin-command-bar"><button class="primary-btn" type="button">新增器材</button><button type="button">新增场馆</button><button type="button">维护工单</button></div>
+      </div>
+      <section class="admin-metrics">
+        <article><span>器材总数</span><strong id="equipmentTotal">0</strong></article>
+        <article><span>智能器材</span><strong id="smartEquipmentTotal">0</strong></article>
+        <article><span>平均密集度</span><strong id="averageCrowdIndex">0</strong></article>
+        <article><span>今日使用</span><strong id="dailyUsesTotal">0</strong></article>
+      </section>
+      <section class="admin-layout admin-equipment-workspace">
+        <article class="panel admin-map-panel">
+          <div class="panel-title"><h3>器材地图与密集度</h3><span>与用户端场馆推荐一致的地图体验</span></div>
+          <div class="venue-map-head admin-map-head">
+            <div><h2>附近场馆与器材密度</h2><p>圆点越大表示该区域器材越多，颜色表示人流密集程度。</p></div>
+            <div class="venue-map-stats"><span><b id="adminVenueTotalCount">0</b><small>器材点位</small></span><span><b id="adminVenueLowCrowdCount">0</b><small>低密度</small></span><span><b id="adminVenueAverageDensity">0</b><small>平均密度</small></span></div>
+          </div>
+          <div id="equipmentMap" class="venue-map equipment-map"></div>
+          <div class="density-legend"><span><i class="low"></i>低</span><span><i class="mid"></i>中</span><span><i class="high"></i>高</span></div>
+          <div id="densityBars" class="density-bars"></div>
+        </article>
+        <div class="admin-ledger-column">
+          <article class="panel equipment-list-panel"><div class="panel-title"><h3>场馆台账</h3><span>新增、编辑和删除场馆</span></div><div id="venueAdminTable" class="admin-table empty">正在加载场馆数据。</div></article>
+          <article class="panel equipment-list-panel"><div class="panel-title"><h3>器材台账</h3><span>横向查看器材信息，点击编辑弹窗修改</span></div><div id="equipmentTable" class="admin-table empty">正在加载器材数据。</div></article>
+        </div>
+      </section>
+    </section>
+
+    <section id="adminGames" class="view admin-view">
+      <div class="admin-page-head">
+        <div><span class="admin-kicker">Motion Level</span><h1>体感关卡管理</h1><p>维护器材、动作、场馆和人群关系。</p></div>
+        <div class="admin-command-bar"><button id="newKgRelationBtn" class="primary-btn" type="button">新建关卡</button></div>
+      </div>
+      <section class="admin-layout">
+        <article class="panel kg-panel">
+          <div class="panel-title"><h3>知识图谱维护</h3><span>器材-动作-场馆-人群关系</span></div>
+          <div id="kgGraph" class="kg-graph"></div><div id="kgEdgeList" class="kg-edge-list empty">正在加载知识图谱。</div>
+        </article>
+      </section>
+    </section>
+
+    <section id="adminReports" class="view admin-view">
+      <div class="admin-page-head"><div><span class="admin-kicker">Reports</span><h1>数据与报表</h1><p>导出运营数据和训练报表。</p></div><div class="admin-command-bar"><button id="exportAdminReportInlineBtn" class="primary-btn" type="button">导出 CSV</button></div></div>
+      <section class="admin-workspace-grid"><article class="admin-card"><div class="admin-card-head"><div><h3>报表中心</h3><span>器材、训练、用户运营数据</span></div></div><div class="admin-status-list"><p><strong>器材使用报表</strong><span>状态、密集度、今日使用次数</span><b>CSV</b></p><p><strong>训练效果报表</strong><span>动作评分、训练时长、完成趋势</span><b>动态</b></p></div></article></section>
+    </section>
+
+    <section id="adminManagers" class="view admin-view">
+      <div class="admin-page-head"><div><span class="admin-kicker">Admin Team & Permission</span><h1>管理员与权限</h1><p>后台账号、角色授权、管理范围和值班状态。</p></div><div class="admin-command-bar"><button class="primary-btn" type="button">新增管理员</button><button type="button">新增角色</button><button type="button">值班安排</button></div></div>
+      <section class="admin-workspace-grid admin-manager-shell">
+        <article class="admin-card admin-wide-card">
+          <div class="admin-card-head">
+            <div><h3>管理员账号</h3><span>来自 users 表，按角色和权限范围展示</span></div>
+            <button type="button">新增管理员</button>
+          </div>
+          <div id="adminManagerList" class="admin-manager-list"></div>
+        </article>
+        <article class="admin-card">
+          <div class="admin-card-head">
+            <div><h3>值班与职责</h3><span>运营、设备和审计分工</span></div>
+            <button type="button">值班安排</button>
+          </div>
+          <div id="adminDutyList" class="admin-status-list"></div>
+        </article>
+      </section>
+      <section class="admin-workspace-grid admin-role-shell">
+        <article class="admin-card admin-wide-card">
+          <div class="admin-card-head">
+            <div><h3>权限矩阵</h3><span>角色、功能访问和数据操作范围</span></div>
+            <button type="button">新增角色</button>
+          </div>
+          <div class="admin-permission-table">
+            <table><thead><tr><th>角色</th><th>用户</th><th>训练</th><th>课程场馆</th><th>器材</th><th>报表</th><th>系统</th></tr></thead><tbody id="adminRoleTableBody"></tbody></table>
+          </div>
+        </article>
+      </section>
+    </section>
+
+    <section id="adminSettings" class="view admin-view">
+      <div class="admin-page-head"><div><span class="admin-kicker">Settings</span><h1>系统设置</h1><p>公告、识别、提醒和后台配置。</p></div><div class="admin-command-bar"><button class="primary-btn" type="button">发布公告</button><button type="button">保存配置</button></div></div>
+      <section class="admin-workspace-grid"><article class="admin-card announce-card"><div class="admin-card-head"><div><h3>系统公告面板</h3><span>最新通知与运营提醒</span></div></div><div id="adminAnnouncements" class="admin-announcement-list"></div></article><article class="admin-card"><div class="admin-card-head"><div><h3>运行参数</h3><span>影响推荐、识别和提醒的后台开关</span></div></div><div id="adminSettingsList" class="admin-status-list"></div></article></section>
+    </section>
+
+    <section id="admin" class="view admin-view">
+      <div class="admin-page-head">
+        <div>
+          <span class="admin-kicker">Operations Console</span>
+          <h1>欢迎回来，管理员 👋</h1>
+          <p>FitFlow 管理后台 · 让全民健身更智能</p>
+        </div>
+        <div class="admin-command-bar">
+          <button id="refreshAdminBtn" class="primary-btn" type="button">刷新数据</button>
+          <button id="exportAdminReportBtn" type="button">导出报表</button>
+          <button id="focusKgBtn" type="button">维护知识图谱</button>
+        </div>
+      </div>
+
+      <section class="admin-kpi-strip" id="adminOverviewSection">
+        <div id="adminOverviewKpis" class="admin-kpi-strip-inner">
+        <article><span>注册用户总数</span><strong>1,243</strong><small>较昨日 +12.5%</small><i>👥</i></article>
+        <article><span>今日活跃用户</span><strong>876</strong><small>较昨日 +8.1%</small><i>〽</i></article>
+        <article><span>今日训练次数</span><strong>1,632</strong><small>较昨日 +15.3%</small><i>🏋</i></article>
+        <article><span>设备在线数量</span><strong>8</strong><small>在线率 80%</small><i>▣</i></article>
+        <article><span>卡路里消耗(今日)</span><strong>12,485 <em>kcal</em></strong><small>较昨日 +10.7%</small><i>🔥</i></article>
+        </div>
+      </section>
+
+      <section class="admin-analytics-grid" id="adminTrainingTrendSection">
+        <article class="admin-card trend-card">
+          <div class="admin-card-head">
+            <div>
+              <h3>训练统计趋势图</h3>
+              <span>不同训练类型、总训练次数和近 7 日趋势</span>
+            </div>
+            <button type="button">近7天⌄</button>
+          </div>
+          <div id="adminTrainingTrend" class="admin-trend-chart"></div>
+        </article>
+
+        <article class="admin-card training-type-card">
+          <div class="admin-card-head">
+            <div>
+              <h3>训练数据概览</h3>
+              <span id="adminTrainingTotalLabel">等待训练数据</span>
+            </div>
+          </div>
+          <div id="adminOverviewTrainingTypes" class="admin-type-chart"></div>
+        </article>
+
+        <article class="admin-card active-rank-card">
+          <div class="admin-card-head">
+            <div>
+              <h3>用户活跃排行榜</h3>
+              <span>TOP 5 活跃指数</span>
+            </div>
+            <button type="button">查看更多</button>
+          </div>
+          <div id="adminActiveRanking" class="admin-rank-list"></div>
+        </article>
+      </section>
+
+      <section class="admin-insight-grid" id="adminInsightSection">
+        <article class="admin-card announce-card">
+          <div class="admin-card-head">
+            <div>
+              <h3>系统公告面板</h3>
+              <span>最新通知与运营提醒</span>
+            </div>
+          </div>
+          <div id="adminAnnouncements" class="admin-announcement-list"></div>
+        </article>
+
+        <article class="admin-card recent-record-card">
+          <div class="admin-card-head">
+            <div>
+              <h3>近期训练记录</h3>
+              <span>与参考图一致的演示数据</span>
+            </div>
+          </div>
+          <div id="adminRecentTraining" class="admin-recent-table"></div>
+        </article>
+      </section>
+
+      <section class="admin-metrics" id="adminMetrics">
+        <article><span>器材总数</span><strong id="equipmentTotal">0</strong></article>
+        <article><span>智能器材</span><strong id="smartEquipmentTotal">0</strong></article>
+        <article><span>平均密集度</span><strong id="averageCrowdIndex">0</strong></article>
+        <article><span>今日使用</span><strong id="dailyUsesTotal">0</strong></article>
+      </section>
+
+      <section class="admin-core-grid" id="adminCoreSection">
+        <article>
+          <b>用户管理</b>
+          <span>用户画像、等级积分、活跃状态、健身历史</span>
+          <div><button type="button">搜索用户</button><button type="button">筛选活跃</button></div>
+        </article>
+        <article>
+          <b>训练数据管理</b>
+          <span>训练类型、动作评分、训练时长、日/周/月趋势</span>
+          <div><button type="button">查看趋势</button><button type="button">异常提醒</button></div>
+        </article>
+        <article>
+          <b>系统与报表</b>
+          <span>CSV/Excel 导出、密度图和运营仪表盘</span>
+          <div><button id="exportAdminReportInlineBtn" type="button">导出 CSV</button></div>
+        </article>
+      </section>
+
+    </section>
+
+    <section id="report" class="view report-view">
+      <article class="report-shell">
+        <div class="report-page-head">
+          <div>
+            <h2>训练报告</h2>
+            <p>分析训练节奏、动作表现、等级进度和积分成长</p>
+          </div>
+          <span>专注 · 评估 · 反馈闭环</span>
+        </div>
+
+        <div class="report-toolbar">
+          <select id="reportTypeSelect" aria-label="报告类型">
+            <option value="weekly">周报</option>
+            <option value="monthly">月报</option>
+          </select>
+          <button id="generateReportBtn" class="primary-btn" type="button">生成报告</button>
+          <button id="loadReportHistoryBtn" type="button">查看历史报告</button>
+        </div>
+
+        <p id="reportSummary" class="report-summary">暂无报告</p>
+
+        <section class="report-card report-rhythm-card">
+          <div class="report-card-title">
+            <div>
+              <h3>训练节奏</h3>
+              <span id="reportRhythmSummary">今日 0 次 · 本周 0 次 · 累计 0 次</span>
+            </div>
+          </div>
+          <div id="weeklyRhythmChart" class="weekly-rhythm-chart"></div>
+          <p class="report-card-note">本周节奏不稳，适合继续保持轻量训练频率。</p>
+        </section>
+
+        <div id="reportInsight" class="report-insight report-stats"></div>
+        <div id="trendChart" class="trend-chart report-trend"></div>
+        <div id="sessionList" class="item-list report-session-list"></div>
+
+        <section class="report-card report-extra">
+          <div class="report-card-title">
+            <h3>等级进度</h3>
+            <span>积分驱动成长</span>
+          </div>
+          <div id="levelSummary" class="item-list level-progress-list empty">暂无等级数据。</div>
+        </section>
+
+        <section class="report-split report-extra">
+          <article class="report-card">
+            <div class="report-card-title">
+              <h3>徽章成就</h3>
+              <span>高分与持续训练激励</span>
+            </div>
+            <div id="badgeList" class="badge-grid empty">暂无徽章数据。</div>
+          </article>
+          <article class="report-card">
+            <div class="report-card-title">
+              <h3>积分流水</h3>
+              <span>每次训练结算记录</span>
+            </div>
+            <div id="pointLogList" class="item-list point-log-list empty">暂无积分流水。</div>
+          </article>
+        </section>
+
+        <section class="report-card report-extra">
+          <div class="report-card-title">
+            <h3>智能体运行记录</h3>
+            <span>展示多智能体协同过程</span>
+          </div>
+          <div id="agentLogList" class="item-list agent-log-list empty">暂无智能体日志。</div>
+        </section>
+      </article>
+    </section>
+
+    <section id="profile" class="view active">
+      <section class="profile-layout">
+        <article class="profile-showcase">
+          <a class="auth-brand-mini" href="#home" aria-label="FitFlow">
+            <span class="brand-cube">F</span>
+            <strong>FitFlow</strong>
+          </a>
+          <div class="showcase-copy">
+            <h2>智能体驱动未来健身</h2>
+            <p>基于多智能体的虚拟游戏化全民健身智能辅助系统</p>
+          </div>
+          <div class="showcase-features">
+            <span><b>个性化体验</b><small>为每位用户量身定制专属训练方案</small></span>
+            <span><b>AI 动作评估</b><small>实时捕捉动作，精准分析与纠正</small></span>
+            <span><b>数据可视化</b><small>多维数据看板，记录每一次进步</small></span>
+            <span><b>游戏化激励</b><small>成就体系与排行榜，激发你的潜能</small></span>
+          </div>
+          <div class="showcase-visual" aria-hidden="true">
+            <span class="runner-core"></span>
+            <i class="metric-a">心率<br><b>96</b></i>
+            <i class="metric-b">步数<br><b>568</b></i>
+            <i class="metric-c">卡路里<br><b>45</b></i>
+          </div>
+          <div class="auth-trust-line">安全可靠 <i></i> 数据加密 <i></i> 隐私保护</div>
+        </article>
+
+        <article class="panel login-panel">
+          <span class="login-kicker">欢迎回来</span>
+          <h3>登录 FitFlow</h3>
+          <p>开启你的智能健身之旅</p>
+          <div class="login-role-hint">
+            <span>用户：demo / 123456</span>
+            <span>管理员：admin / admin123</span>
+          </div>
+          <label for="username">账号</label>
+          <input id="username" placeholder="用户名 / 邮箱 / 手机号" value="demo">
+          <label for="password">密码</label>
+          <input id="password" type="password" placeholder="密码" value="123456">
+          <label for="nickname">昵称</label>
+          <input id="nickname" placeholder="注册时填写昵称" value="李同学">
+          <div class="remember-row">
+            <label><input type="checkbox" checked> 记住我</label>
+            <button type="button">忘记密码?</button>
+          </div>
+          <div class="login-actions">
+            <button id="loginBtn" type="button">登录</button>
+            <button id="registerBtn" type="button">注册</button>
+          </div>
+          <div class="social-login">
+            <span>Q</span>
+            <span>微</span>
+            <span>GH</span>
+            <span>G</span>
+          </div>
+          <small class="register-hint">还没有账号？可填写昵称后点击注册</small>
+        </article>
+
+        <article class="panel profile-panel">
+          <div class="profile-panel-head">
+            <h3>用户画像录入</h3>
+            <button id="profileLogoutBtn" class="profile-logout-btn" type="button">退出登录</button>
+          </div>
+          <label for="age">年龄</label>
+          <input id="age" type="number" value="20">
+          <label for="fitnessLevel">体能水平</label>
+          <select id="fitnessLevel">
+            <option value="beginner">新手</option>
+            <option value="intermediate">进阶</option>
+            <option value="advanced">熟练</option>
+          </select>
+          <label for="injuries">伤病史</label>
+          <input id="injuries" placeholder="例如：膝关节不适">
+          <label for="preference">运动偏好</label>
+          <input id="preference" value="综合训练">
+          <label for="location">当前位置</label>
+          <input id="location" value="校园东区">
+          <button id="saveProfileBtn" class="primary-btn" type="button">保存画像并刷新推荐</button>
+        </article>
+
+        <article class="panel profile-ai-panel">
+          <div class="panel-title">
+            <h3>AI推荐结果</h3>
+            <span id="profileAiStatus">等待画像生成</span>
+          </div>
+          <div class="ai-result-grid">
+            <section class="ai-result-card equipment-card">
+              <b>推荐器材</b>
+              <div id="profileEquipmentList" class="ai-result-list">提交画像后生成器材推荐。</div>
+            </section>
+            <section class="ai-result-card plan-card">
+              <b>推荐方案</b>
+              <div id="profilePlanList" class="ai-result-list">提交画像后生成训练方案。</div>
+            </section>
+            <section class="ai-result-card risk-card">
+              <b>风险提醒</b>
+              <div id="profileRiskList" class="ai-result-list">提交画像后生成风险提醒。</div>
+            </section>
+            <section class="ai-result-card venue-card-mini">
+              <b>场馆推荐</b>
+              <div id="profileVenueList" class="ai-result-list">提交画像后生成附近场馆。</div>
+            </section>
+          </div>
+        </article>
+
+        <article class="agent-map">
+          <h3>多智能体协同</h3>
+          <span><b>画像智能体</b> 建模年龄、体能、伤病史和运动偏好</span>
+          <span><b>动作评估智能体</b> 调用 MediaPipe 关键点评分</span>
+          <span><b>图谱推荐智能体</b> 匹配用户-动作-场馆-环境</span>
+          <span><b>游戏激励智能体</b> 结算积分、连击、等级和徽章</span>
+          <span><b>报告智能体</b> 生成下一轮训练优化建议</span>
+        </article>
+      </section>
+
+      <section class="panel profile-kg-panel">
+        <div class="panel-title">
+          <h3>AI推荐推理图谱</h3>
+          <span id="profileKgStatus">用户输入 -> 推荐结果</span>
+        </div>
+        <div id="profileKnowledgeGraph" class="profile-kg-canvas" aria-label="知识图谱可视化"></div>
+      </section>
+    </section>
+  </main>
+
+  <div id="reportModal" class="modal-backdrop" aria-hidden="true">
+    <div class="modal-panel" role="dialog" aria-modal="true" aria-labelledby="reportModalTitle">
+      <div class="modal-head">
+        <div>
+          <h3 id="reportModalTitle">报告详情</h3>
+          <p id="reportModalMeta">-</p>
+        </div>
+        <button id="closeReportModalBtn" class="modal-close" type="button">关闭</button>
+      </div>
+      <div id="reportModalBody" class="modal-body"></div>
+    </div>
+  </div>
+
+  <script src="/static/vendor/leaflet/leaflet.js"></script>
+  <script type="module" src="/static/app.js?v=20260604-themed-confirm"></script>
+  <script>
+    document.querySelectorAll(".nav").forEach((button) => {
+      button.addEventListener("click", () => {
+        const viewId = button.dataset.view;
+        document.querySelectorAll(".nav").forEach((item) => {
+          const sameAdminTarget = button.dataset.adminTarget && item === button;
+          const sameView = item.dataset.view === viewId && !button.dataset.adminTarget;
+          item.classList.toggle("active", sameAdminTarget || sameView);
+        });
+        document.querySelectorAll(".view").forEach((item) => {
+          item.classList.toggle("active", item.id === viewId);
+        });
+        if (button.dataset.adminTarget) {
+          document.getElementById(button.dataset.adminTarget)?.scrollIntoView({ behavior: "smooth", block: "start" });
+        }
+        if (viewId === "game") {
+          const hub = document.getElementById("trainingHub");
+          const workspace = document.getElementById("trainingWorkspace");
+          if (hub && workspace) {
+            workspace.hidden = true;
+            workspace.classList.remove("running-layout", "boxing-layout");
+            hub.hidden = false;
+          }
+        }
+        if (viewId === "venues") {
+          setTimeout(() => {
+            if (window.fitnessApp?.refreshVenueLocationAndData) {
+              window.fitnessApp.refreshVenueLocationAndData();
+            } else {
+              window.fitnessApp?.refreshVenueMap?.();
+            }
+          }, 140);
+        }
+        if (!button.dataset.adminTarget) {
+          window.scrollTo({ top: 0, behavior: "smooth" });
+        }
+      });
+    });
+
+    document.querySelectorAll("#trainingHub .training-cover").forEach((card) => {
+      card.addEventListener("click", () => {
+        const exercise = card.dataset.exercise || "";
+        if (window.fitnessApp?.enterTraining) {
+          window.fitnessApp.enterTraining(exercise);
+          return;
+        }
+        const hub = document.getElementById("trainingHub");
+        const workspace = document.getElementById("trainingWorkspace");
+        const select = document.getElementById("exerciseSelect");
+        if (select && exercise) {
+          const exists = Array.from(select.options).some((option) => option.value === exercise);
+          if (!exists) select.add(new Option(exercise, exercise));
+          select.value = exercise;
+        }
+        document.querySelectorAll("#trainingHub .training-cover").forEach((item) => {
+          item.classList.toggle("active", item === card);
+        });
+        if (hub && workspace) {
+          hub.hidden = true;
+          workspace.hidden = false;
+          workspace.classList.toggle("running-layout", exercise === "快走" || exercise === "节奏冲刺");
+          workspace.classList.toggle("boxing-layout", exercise === "拳击挥击");
+        }
+        const title = document.querySelector(".game-panel h2");
+        const intro = document.querySelector(".game-panel .stage-top p");
+        if (title) {
+          title.textContent = exercise === "快走"
+            ? "跑步与快走体感训练"
+            : exercise === "拳击挥击"
+              ? "拳击与踢击体感训练"
+              : `${exercise}体感训练`;
+        }
+        if (intro) {
+          intro.textContent = exercise === "拳击挥击"
+            ? "摄像头识别左右挥拳和下蹲闪避，小人会跟随你的身体动作完成拳击训练。"
+            : "摄像头识别真实动作，并根据动作状态计算训练得分。";
+        }
+        drawFallbackTraining(exercise);
+        window.fitnessApp?.drawGame?.();
+        window.scrollTo({ top: 0, behavior: "smooth" });
+      });
+    });
+
+    document.getElementById("startGameBtn")?.addEventListener("click", async () => {
+      if (window.fitnessApp?.startGame) return;
+
+      const button = document.getElementById("startGameBtn");
+      const currentAction = document.getElementById("currentAction");
+      const timeLeft = document.getElementById("timeLeft");
+      const durationInput = document.getElementById("durationInput");
+      const cameraPreview = document.getElementById("cameraPreview");
+      const exercise = document.getElementById("exerciseSelect")?.value || "快走";
+      let remaining = Number(durationInput?.value) || 60;
+
+      button.textContent = "训练中";
+      button.classList.add("is-running");
+      currentAction.textContent = "摄像头启动中";
+      timeLeft.textContent = remaining;
+      drawFallbackTraining(exercise);
+
+      try {
+        const stream = await navigator.mediaDevices.getUserMedia({
+          video: { width: 960, height: 540, facingMode: "user" },
+          audio: false,
+        });
+        cameraPreview.srcObject = stream;
+        cameraPreview.classList.add("active");
+        currentAction.textContent = "识别中";
+      } catch (error) {
+        currentAction.textContent = "摄像头未授权";
+      }
+
+      clearInterval(window.__trainingFallbackTimer);
+      window.__trainingFallbackTimer = setInterval(() => {
+        remaining -= 1;
+        timeLeft.textContent = Math.max(0, remaining);
+        if (remaining <= 0) {
+          clearInterval(window.__trainingFallbackTimer);
+          button.textContent = "重新开始";
+          button.classList.remove("is-running");
+          currentAction.textContent = "已完成";
+        }
+      }, 1000);
+    });
+
+    function drawFallbackTraining(exercise) {
+      const canvas = document.getElementById("gameCanvas");
+      if (!canvas) return;
+      const ctx = canvas.getContext("2d");
+      const w = canvas.width;
+      const h = canvas.height;
+      const src = exercise === "快走"
+        ? "/static/covers/cover-running.png"
+        : exercise === "拳击挥击"
+          ? "/static/covers/cover-boxing.png"
+          : exercise === "开合跳"
+            ? "/static/covers/cover-jumping.png"
+            : exercise === "动态拉伸"
+              ? "/static/covers/cover-stretch.png"
+              : exercise === "平板支撑"
+                ? "/static/covers/cover-core.png"
+                : "/static/covers/cover-squat.png";
+
+      const paint = (img) => {
+        ctx.clearRect(0, 0, w, h);
+        if (img?.naturalWidth) {
+          const scale = Math.max(w / img.naturalWidth, h / img.naturalHeight);
+          const sw = w / scale;
+          const sh = h / scale;
+          ctx.drawImage(img, (img.naturalWidth - sw) / 2, (img.naturalHeight - sh) / 2, sw, sh, 0, 0, w, h);
+        } else {
+          const g = ctx.createLinearGradient(0, 0, 0, h);
+          g.addColorStop(0, "#172033");
+          g.addColorStop(1, "#0b111b");
+          ctx.fillStyle = g;
+          ctx.fillRect(0, 0, w, h);
+        }
+
+        ctx.fillStyle = "rgba(5, 11, 22, .20)";
+        ctx.fillRect(0, 0, w, h);
+        if (src.includes("cover-boxing")) {
+          const ringPatch = ctx.createRadialGradient(w * .5, h * .56, h * .04, w * .5, h * .58, h * .30);
+          ringPatch.addColorStop(0, "rgba(23, 29, 47, .96)");
+          ringPatch.addColorStop(.55, "rgba(31, 20, 31, .90)");
+          ringPatch.addColorStop(1, "rgba(8, 11, 20, .34)");
+          ctx.fillStyle = ringPatch;
+          ctx.fillRect(w * .26, h * .22, w * .48, h * .62);
+        }
+
+        const cx = w * .58;
+        const headY = h * .34;
+        const shoulderY = h * .48;
+        const hipY = h * .66;
+        const segments = [
+          [[cx, headY + h * .075], [cx, hipY]],
+          [[cx, shoulderY], [cx - w * .12, h * .58]],
+          [[cx, shoulderY], [cx + w * .12, h * .58]],
+          [[cx, hipY], [cx - w * .09, h * .84]],
+          [[cx, hipY], [cx + w * .09, h * .84]],
+        ];
+
+        ctx.save();
+        ctx.lineCap = "round";
+        ctx.lineJoin = "round";
+        ctx.shadowColor = "rgba(47,108,246,.8)";
+        ctx.shadowBlur = 22;
+        ctx.strokeStyle = "rgba(47,108,246,.96)";
+        ctx.lineWidth = Math.max(18, w * .028);
+        for (const [from, to] of segments) {
+          ctx.beginPath();
+          ctx.moveTo(from[0], from[1]);
+          ctx.lineTo(to[0], to[1]);
+          ctx.stroke();
+        }
+        ctx.strokeStyle = "#f8fbff";
+        ctx.lineWidth = Math.max(9, w * .018);
+        for (const [from, to] of segments) {
+          ctx.beginPath();
+          ctx.moveTo(from[0], from[1]);
+          ctx.lineTo(to[0], to[1]);
+          ctx.stroke();
+        }
+        const head = ctx.createRadialGradient(cx - w * .018, headY - h * .014, 2, cx, headY, h * .055);
+        head.addColorStop(0, "#ffffff");
+        head.addColorStop(1, "#dfe8f7");
+        ctx.fillStyle = head;
+        ctx.strokeStyle = "rgba(47,108,246,.96)";
+        ctx.lineWidth = Math.max(6, w * .01);
+        ctx.beginPath();
+        ctx.arc(cx, headY, h * .055, 0, Math.PI * 2);
+        ctx.fill();
+        ctx.stroke();
+        ctx.restore();
+      };
+
+      const img = new Image();
+      img.onload = () => paint(img);
+      img.onerror = () => paint(null);
+      img.src = src;
+      paint(null);
+    }
+  </script>
+</body>
+</html>

@@ -1,0 +1,7 @@
+﻿city,source,metric,value,captured_at
+石家庄,open_meteo_forecast,interval,900,2026-05-18T09:45
+石家庄,open_meteo_forecast,temperature_2m,22.9,2026-05-18T09:45
+石家庄,open_meteo_forecast,relative_humidity_2m,58,2026-05-18T09:45
+石家庄,open_meteo_forecast,precipitation,0.0,2026-05-18T09:45
+石家庄,open_meteo_forecast,weather_code,3,2026-05-18T09:45
+石家庄,open_meteo_forecast,wind_speed_10m,7.9,2026-05-18T09:45
