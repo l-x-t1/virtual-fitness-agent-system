@@ -13,7 +13,7 @@ MYSQL_CONFIG = {
     "host": os.getenv("MYSQL_HOST", "127.0.0.1"),
     "port": int(os.getenv("MYSQL_PORT", "3306")),
     "user": os.getenv("MYSQL_USER", "root"),
-    "password": os.getenv("MYSQL_PASSWORD", "123456"),
+    "password": os.getenv("MYSQL_PASSWORD", "12345678"),
     "database": os.getenv("MYSQL_DATABASE", "virtual_fitness_agent_system"),
     "charset": "utf8mb4",
 }
@@ -509,7 +509,7 @@ def _seed_from_sqlite(conn):
 def _ensure_demo_user(conn):
     demo = conn.execute("SELECT id, password, role FROM users WHERE username = ?", ("demo",)).fetchone()
     if demo:
-        if demo["password"] != "123456":
+        if demo["password"] != "123456" and not demo["password"].startswith(("$2a$", "$2b$", "$2y$")):
             conn.execute("UPDATE users SET password = ? WHERE username = ?", ("123456", "demo"))
     else:
         conn.execute(
@@ -522,7 +522,8 @@ def _ensure_demo_user(conn):
 
     admin = conn.execute("SELECT id, password, role FROM users WHERE username = ?", ("admin",)).fetchone()
     if admin:
-        if admin["password"] != "admin123" or admin.get("role") != "admin":
+        password_is_valid = admin["password"] == "admin123" or admin["password"].startswith(("$2a$", "$2b$", "$2y$"))
+        if not password_is_valid or admin.get("role") != "admin":
             conn.execute("UPDATE users SET password = ?, role = ? WHERE username = ?", ("admin123", "admin", "admin"))
         return
 
