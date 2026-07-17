@@ -46,3 +46,23 @@ data/fitness.db        运行后自动生成的数据库
 - 将轻量图谱迁移到 NetworkX 或 Neo4j。
 - 接入天气、空气质量、场馆人流 API。
 - 增加教师端或管理员端，用于查看试点数据与干预建议。
+# FastAPI 版本启动说明
+
+后端已迁移到 FastAPI，原生 `http.server` 启动方式已废弃。
+
+```bash
+python -m pip install -r requirements.txt
+cp .env.example .env
+uvicorn app.main:app --host 127.0.0.1 --port 8765
+```
+
+启动后可访问：
+
+- 系统页面：`http://127.0.0.1:8765/`
+- Swagger 文档：`http://127.0.0.1:8765/docs`
+- ReDoc 文档：`http://127.0.0.1:8765/redoc`
+- OpenAPI：`http://127.0.0.1:8765/openapi.json`
+- 训练 WebSocket：`ws://127.0.0.1:8765/ws/training?token=<JWT>`
+
+生产部署前必须设置长度不少于 32 字节的 `JWT_SECRET`。登录和注册返回 Bearer access token；
+受保护接口不再接受 `user_id` 或 `admin_user_id` 作为身份凭证。

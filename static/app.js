@@ -1,5 +1,6 @@
 const state = {
   user: null,
+  accessToken: sessionStorage.getItem("fitness_access_token") || "",
   dashboard: null,
   reportHistory: [],
   admin: {
@@ -432,13 +433,31 @@ state.assets.coreCover = loadImage("/static/covers/cover-core.png");
 state.assets.squatCover = loadImage("/static/covers/cover-squat.png");
 
 async function api(path, options = {}) {
-  const response = await fetch(path, {
-    headers: { "Content-Type": "application/json" },
-    ...options,
-  });
+  const url = new URL(path, window.location.origin);
+  url.searchParams.delete("user_id");
+  url.searchParams.delete("admin_user_id");
+  const requestOptions = { ...options };
+  if (typeof requestOptions.body === "string") {
+    try {
+      const body = JSON.parse(requestOptions.body);
+      delete body.user_id;
+      delete body.admin_user_id;
+      requestOptions.body = JSON.stringify(body);
+    } catch (_) {}
+  }
+  const headers = { "Content-Type": "application/json", ...(requestOptions.headers || {}) };
+  if (state.accessToken) headers.Authorization = `Bearer ${state.accessToken}`;
+  const response = await fetch(`${url.pathname}${url.search}`, { ...requestOptions, headers });
   const data = await response.json();
-  if (!response.ok) throw new Error(data.error || "请求失败");
-  return data;
+  if (response.status === 401) {
+    state.accessToken = "";
+    state.user = null;
+    sessionStorage.removeItem("fitness_access_token");
+    sessionStorage.removeItem("fitness_user");
+    setAuthState(false);
+  }
+  if (!response.ok) throw new Error(data.message || data.error || "请求失败");
+  return data.data;
 }
 
 function setStatus(text, tone = "") {
@@ -585,6 +604,7 @@ function showView(viewId) {
 
 function setUser(user) {
   state.user = user;
+  sessionStorage.setItem("fitness_user", JSON.stringify(user));
   setAuthState(true);
   renderTopUserChrome();
   $("userLevel").textContent = user.level;
@@ -596,8 +616,17 @@ function setUser(user) {
   $("location").value = user.location || "校园东区";
 }
 
+function setSession(session) {
+  state.accessToken = session.access_token;
+  sessionStorage.setItem("fitness_access_token", session.access_token);
+  setUser(session.user);
+}
+
 function logout() {
   state.user = null;
+  state.accessToken = "";
+  sessionStorage.removeItem("fitness_access_token");
+  sessionStorage.removeItem("fitness_user");
   state.dashboard = null;
   state.reportHistory = [];
   setAuthState(false);
@@ -1597,7 +1626,7 @@ async function login() {
       method: "POST",
       body: JSON.stringify({ username: $("username").value, password: $("password").value }),
     });
-    setUser(data.user);
+    setSession(data);
     if (!isAdminUser()) await loadDashboard();
     showView(isAdminUser() ? "admin" : "dashboard");
   } catch (error) {
@@ -1615,7 +1644,7 @@ async function register() {
         nickname: $("nickname").value,
       }),
     });
-    setUser(data.user);
+    setSession(data);
     await loadDashboard();
     showView("dashboard");
   } catch (error) {
@@ -3878,7 +3907,7 @@ async function submitEquipmentModal(event) {
 
 async function deleteEquipment(id) {
   if (!id || !(await confirmAction("确定删除该器材吗？"))) return;
-  await api("/api/admin/equipment/delete", { method: "POST", body: JSON.stringify({ id, admin_user_id: state.user.id }) });
+  await api(`/api/admin/equipment/${id}`, { method: "DELETE" });
   await loadAdminData();
 }
 
@@ -3955,7 +3984,7 @@ async function submitVenueModal(event) {
 
 async function deleteVenue(id) {
   if (!id || !(await confirmAction("确定删除该场馆吗？关联器材会自动解除绑定。"))) return;
-  await api("/api/admin/venue/delete", { method: "POST", body: JSON.stringify({ id, admin_user_id: state.user.id }) });
+  await api(`/api/admin/venue/${id}`, { method: "DELETE" });
   await loadAdminData();
 }
 
@@ -4333,7 +4362,7 @@ async function submitKnowledgeEdge(event) {
 
 async function deleteKnowledgeEdge(id) {
   if (!id || !(await confirmAction("确定删除该知识图谱关系吗？"))) return;
-  await api("/api/admin/knowledge-graph/delete", { method: "POST", body: JSON.stringify({ id, admin_user_id: state.user.id }) });
+  await api(`/api/admin/knowledge-graph/${id}`, { method: "DELETE" });
   await loadAdminData();
 }
 
@@ -4467,10 +4496,7 @@ async function saveAdminAccountForm(form) {
 async function deleteAdminAccount(user) {
   if (!user?.id) return;
   if (!(await confirmAction(`确定删除账号 ${user.username} 吗？相关训练记录会按数据库外键同步清理。`))) return;
-  await api("/api/admin/user/delete", {
-    method: "POST",
-    body: JSON.stringify({ admin_user_id: state.user.id, id: user.id }),
-  });
+  await api(`/api/admin/user/${user.id}`, { method: "DELETE" });
   await loadAdminData();
   closeReportModal();
   showUsersModal(user.role === "admin" ? "admin" : "");
@@ -4858,13 +4884,29 @@ function bindEvents() {
 }
 
 async function init() {
-  setAuthState(false);
+  const storedUser = sessionStorage.getItem("fitness_user");
+  if (state.accessToken && storedUser) {
+    try {
+      setUser(JSON.parse(storedUser));
+    } catch (_) {
+      logout();
+    }
+  } else {
+    setAuthState(false);
+  }
   bindEvents();
   renderProfileAi();
-  showView("profile");
+  showView(state.user ? (isAdminUser() ? "admin" : "dashboard") : "profile");
   hydrateVenueHeader();
   drawGame();
   await loadExerciseLibrary();
+  if (state.user && !isAdminUser()) {
+    try {
+      await loadDashboard();
+    } catch (_) {
+      logout();
+    }
+  }
 }
 
 window.fitnessApp = {
