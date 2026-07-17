@@ -1,0 +1,17 @@
+{
+  "city": "石家庄",
+  "latitude": 38.0428,
+  "longitude": 114.5149,
+  "venue_count": 0,
+  "weather_metric_count": 6,
+  "air_metric_count": 8,
+  "hourly_count": 144,
+  "body_reference_count": 0,
+  "activity_met_count": 0,
+  "bmi_rule_count": 8,
+  "duration_rule_count": 3,
+  "injury_rule_count": 7,
+  "exercise_seed_count": 18,
+  "output_dir": "tools\\data_seed\\shijiazhuang",
+  "note": "AMap venue data requires AMAP_KEY. NHANES requires pandas. Weather and air quality use Open-Meteo."
+}

@@ -1,0 +1,9 @@
+﻿city,source,metric,value,captured_at
+石家庄,open_meteo_air_quality,interval,3600,2026-05-18T09:00
+石家庄,open_meteo_air_quality,pm10,16.1,2026-05-18T09:00
+石家庄,open_meteo_air_quality,pm2_5,11.0,2026-05-18T09:00
+石家庄,open_meteo_air_quality,carbon_monoxide,601.0,2026-05-18T09:00
+石家庄,open_meteo_air_quality,nitrogen_dioxide,28.5,2026-05-18T09:00
+石家庄,open_meteo_air_quality,sulphur_dioxide,7.6,2026-05-18T09:00
+石家庄,open_meteo_air_quality,ozone,45.0,2026-05-18T09:00
+石家庄,open_meteo_air_quality,us_aqi,62,2026-05-18T09:00
