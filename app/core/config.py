@@ -1,5 +1,23 @@
 import os
 from dataclasses import dataclass
+from pathlib import Path
+
+
+def _load_dotenv() -> None:
+    env_file = Path(__file__).resolve().parents[2] / ".env"
+    if not env_file.exists():
+        return
+    for raw_line in env_file.read_text(encoding="utf-8").splitlines():
+        line = raw_line.strip()
+        if not line or line.startswith("#") or "=" not in line:
+            continue
+        key, value = line.split("=", 1)
+        key = key.strip()
+        value = value.strip().strip('"').strip("'")
+        os.environ.setdefault(key, value)
+
+
+_load_dotenv()
 
 
 @dataclass(frozen=True)
@@ -23,6 +41,14 @@ class Settings:
         for value in os.getenv("CORS_ORIGINS", "http://127.0.0.1:8765,http://localhost:8765").split(",")
         if value.strip()
     )
+    llm_provider: str = os.getenv("LLM_PROVIDER", "deepseek")
+    model_name: str = os.getenv("MODEL_NAME", "")
+    deepseek_api_key: str = os.getenv("DEEPSEEK_API_KEY", "")
+    deepseek_base_url: str = os.getenv("DEEPSEEK_BASE_URL", "https://api.deepseek.com")
+    dashscope_api_key: str = os.getenv("DASHSCOPE_API_KEY", "")
+    dashscope_base_url: str = os.getenv("DASHSCOPE_BASE_URL", "https://dashscope.aliyuncs.com/compatible-mode/v1")
+    llm_temperature: float = float(os.getenv("LLM_TEMPERATURE", "0.2"))
+    llm_timeout: int = int(os.getenv("LLM_TIMEOUT", "60"))
 
 
 settings = Settings()

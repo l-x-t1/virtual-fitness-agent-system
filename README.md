@@ -66,3 +66,26 @@ uvicorn app.main:app --host 127.0.0.1 --port 8765
 
 生产部署前必须设置长度不少于 32 字节的 `JWT_SECRET`。登录和注册返回 Bearer access token；
 受保护接口不再接受 `user_id` 或 `admin_user_id` 作为身份凭证。
+
+## LLM Agent 调试
+
+5 个智能体已支持 LangChain + DeepSeek / 阿里百炼兼容接口。复制 `.env.example` 为 `.env` 后，可按需配置：
+
+```text
+LLM_PROVIDER=deepseek
+MODEL_NAME=deepseek-chat
+DEEPSEEK_API_KEY=
+
+# 或
+LLM_PROVIDER=dashscope
+MODEL_NAME=qwen-plus
+DASHSCOPE_API_KEY=
+```
+
+本地快速查看 5 个 Agent 的结构化输出：
+
+```bash
+python test_agents.py
+```
+
+该脚本使用模拟用户、训练历史和 MediaPipe 姿态数据，不依赖真实数据库或线上 API Key。
