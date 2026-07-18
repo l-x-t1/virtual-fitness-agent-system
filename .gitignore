@@ -1,0 +1,9 @@
+__pycache__/
+data/*.db
+*.pyc
+.env
+fitness.db
+server.log
+server.err.log
+tmp_server.out.log
+tmp_server.err.log

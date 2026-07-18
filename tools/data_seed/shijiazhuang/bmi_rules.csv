@@ -1,0 +1,9 @@
+﻿standard,category,min_bmi,max_bmi,risk_hint
+China adult,偏瘦,0,18.49,体重偏低，训练以基础力量、均衡营养和循序渐进为主。
+China adult,正常,18.5,23.99,BMI处于正常范围，可根据体能水平安排有氧和力量训练。
+China adult,超重,24,27.99,建议优先低冲击有氧和力量训练，逐步增加训练量。
+China adult,肥胖,28,99,运动风险较高，避免突然高强度冲刺和跳跃。
+WHO adult,Underweight,0,18.49,Underweight range.
+WHO adult,Normal,18.5,24.99,Normal range.
+WHO adult,Overweight,25,29.99,Overweight range.
+WHO adult,Obesity,30,99,Obesity range.

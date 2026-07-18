@@ -1,0 +1,4 @@
+﻿population,risk_level,weekly_minutes,strength_days,single_session_minutes,intensity,source
+adult,low,150-300中等强度有氧，或75-150高强度有氧,每周至少2天,30-60,中等，可按体能加入较高强度,WHO / CDC physical activity guidelines
+adult,medium,从90-150分钟逐步增加到150分钟以上,每周1-2天，从低负荷开始,20-40,低到中等，避免突然冲刺,WHO / CDC physical activity guidelines + project safety rule
+adult,high,以10-20分钟短时低强度活动起步,以康复、关节活动和轻阻力为主,10-20,低强度，建议先咨询医生或专业教练,Project safety rule based on public activity guidelines
