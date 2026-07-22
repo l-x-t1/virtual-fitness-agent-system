@@ -145,9 +145,7 @@ def _resolve_goals_from_preference(preference: str) -> list[str]:
 
 def import_users() -> int:
     with session_scope() as session:
-        from sqlalchemy import text
-        result = session.execute(text("SELECT id, nickname, age, fitness_level, injuries, preference, location, points, level, role FROM users"))
-        users = [dict(row._mapping) for row in result]
+        users = FitnessRepository(session).graph_users()
 
     count = 0
     for u in users:
@@ -175,9 +173,7 @@ def import_users() -> int:
 
 def import_exercises() -> int:
     with session_scope() as session:
-        from sqlalchemy import text
-        result = session.execute(text("SELECT id, name, category, difficulty, target, equipment, standard_json FROM exercises"))
-        exercises = [dict(row._mapping) for row in result]
+        exercises = FitnessRepository(session).graph_exercises()
 
     count = 0
     for ex in exercises:
@@ -218,9 +214,7 @@ def import_exercises() -> int:
 
 def import_venues() -> int:
     with session_scope() as session:
-        from sqlalchemy import text
-        result = session.execute(text("SELECT id, name, location, latitude, longitude, equipment, capacity, crowd_index, air_quality, rating, density_score, kind, open_hours FROM venues"))
-        venues = [dict(row._mapping) for row in result]
+        venues = FitnessRepository(session).graph_venues()
 
     count = 0
     for v in venues:
