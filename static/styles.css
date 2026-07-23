@@ -115,6 +115,31 @@ button {
   text-align: center;
 }
 
+.ai-coach-entry {
+  position: relative;
+  text-decoration: none !important;
+}
+
+.ai-coach-entry:link,
+.ai-coach-entry:visited,
+.ai-coach-entry:hover,
+.ai-coach-entry:active,
+.ai-coach-entry span,
+.ai-coach-entry em {
+  text-decoration: none !important;
+}
+
+.ai-coach-entry em {
+  margin-left: auto;
+  padding: 3px 7px;
+  border-radius: 999px;
+  color: #ffffff;
+  background: linear-gradient(135deg, #2f6cf6, #935cff);
+  font-size: 9px;
+  font-style: normal;
+  letter-spacing: 0.08em;
+}
+
 .nav.active,
 .nav:hover {
   color: white;

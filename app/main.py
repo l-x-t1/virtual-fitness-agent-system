@@ -11,7 +11,7 @@ from fastapi.responses import FileResponse, JSONResponse
 from fastapi.staticfiles import StaticFiles
 
 from agents import AgentCoordinator
-from app.controllers import admin, auth, graph, training, users, venues, websocket
+from app.controllers import admin, ai, auth, graph, training, users, venues, websocket
 from app.core.config import settings
 from app.core.exceptions import AppError
 from app.services import fitness_service
@@ -93,6 +93,7 @@ app.include_router(venues.router)
 app.include_router(admin.router)
 app.include_router(websocket.router)
 app.include_router(graph.router)
+app.include_router(ai.router)
 app.mount("/static", StaticFiles(directory=BASE_DIR / "static"), name="static")
 
 

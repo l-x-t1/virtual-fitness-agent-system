@@ -1,0 +1,53 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1">
+  <title>AI 对话教练</title>
+  <link rel="stylesheet" href="/static/ai-coach.css?v=20260723-session-fix">
+</head>
+<body>
+  <main class="shell">
+    <header>
+      <div><span class="eyebrow">VIRTUAL FITNESS LAB</span><h1>AI 对话教练</h1></div>
+      <div class="status"><i></i><span id="mode">正在连接</span></div>
+    </header>
+    <section class="layout">
+      <aside>
+        <button id="new-session" class="primary">＋ 新对话</button>
+        <h2>会话</h2><div id="sessions" class="sessions"></div>
+        <h2>模型</h2>
+        <select id="provider"><option value="deepseek">DeepSeek</option><option value="dashscope">阿里云百炼</option></select>
+        <input id="model" placeholder="模型名（可选）">
+        <button id="test-provider" class="secondary" type="button">测试模型连接</button>
+        <p id="provider-result" class="provider-result"></p>
+        <a href="/" class="back">← 返回系统首页</a>
+      </aside>
+      <section class="coach">
+        <div class="hero">
+          <div class="orb">AI</div>
+          <div><h2>你的私人训练搭档</h2><p>可询问动作、恢复、训练安排；无 API Key 也能现场演示。</p></div>
+        </div>
+        <div id="messages" class="messages"></div>
+        <div class="quick">
+          <button data-question="深蹲时膝盖应该注意什么？">深蹲纠错</button>
+          <button data-question="新手每周训练几次合适？">新手频率</button>
+          <button id="make-plan">生成训练卡</button>
+        </div>
+        <form id="chat-form">
+          <button type="button" id="voice" title="开始语音输入" aria-label="开始语音输入">🎙</button>
+          <textarea id="message" rows="1" maxlength="2000" placeholder="问问你的 AI 教练…" required></textarea>
+          <button class="send" type="submit">发送</button>
+        </form>
+        <div id="voice-status" class="voice-status" role="status" aria-live="polite">点击麦克风开始语音输入</div>
+        <label class="speak"><input id="auto-speak" type="checkbox" checked> 自动语音播报</label>
+      </section>
+      <aside class="card-panel">
+        <h2>个性化训练卡</h2>
+        <div id="plan" class="empty">点击“生成训练卡”，AI 会结合你的身体数据与近期训练生成结构化方案。</div>
+      </aside>
+    </section>
+  </main>
+  <script src="/static/ai-coach.js?v=20260723-voice-fix"></script>
+</body>
+</html>
