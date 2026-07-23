@@ -20,6 +20,14 @@ class GraphQueryRequest(BaseModel):
     question: str = Field(..., min_length=1, max_length=500, description="自然语言查询，如'推荐适合新手的核心训练动作'")
 
 
+class GraphSearchRequest(BaseModel):
+    """GraphRAG 知识检索请求"""
+    query: str = Field(..., min_length=1, max_length=500, description="用户问题或知识检索文本")
+    user_id: int | None = Field(None, ge=1, description="可选用户 ID；默认使用当前登录用户")
+    top_k: int = Field(8, ge=1, le=20, description="返回和检索的最大条数")
+    use_llm: bool = Field(True, description="是否调用 LLM 生成最终答案")
+
+
 class GraphRecommendRequest(BaseModel):
     """结构化推荐请求 — 供推荐 Agent 调用"""
     user_id: int = Field(..., description="用户ID")
@@ -84,6 +92,17 @@ class GraphQueryResponse(BaseModel):
     cypher: str = Field("", description="生成的 Cypher 语句（调试用）")
     exercises: list[ExerciseRecommendItem] = Field(default_factory=list)
     venues: list[VenueRecommendItem] = Field(default_factory=list)
+
+
+class GraphSearchResponse(BaseModel):
+    """GraphRAG 检索响应，供 API 和 Agent 消费"""
+    query: str = ""
+    knowledge: list[dict] = Field(default_factory=list)
+    relations: list[dict] = Field(default_factory=list)
+    answer: str = ""
+    context: str = ""
+    keywords: list[str] = Field(default_factory=list)
+    used_llm: bool = False
 
 
 class GraphStatusResponse(BaseModel):

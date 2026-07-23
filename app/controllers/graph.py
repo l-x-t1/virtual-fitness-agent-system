@@ -13,6 +13,7 @@ from app.models.graph import (
     GraphImportRequest,
     GraphQueryRequest,
     GraphRecommendRequest,
+    GraphSearchRequest,
 )
 from app.services.graph_service import GraphService, get_graph_service
 
@@ -68,6 +69,27 @@ async def graph_query(
     return envelope(
         request,
         await run_in_threadpool(service.query, body.question),
+    )
+
+
+@router.post("/search", summary="GraphRAG 健身知识检索")
+async def graph_search(
+    request: Request,
+    body: GraphSearchRequest,
+    user: dict = Depends(get_current_user),
+    service: GraphService = Depends(get_graph_service),
+):
+    """检索知识图谱并返回 knowledge、relations 和 answer，供 AI Agent 调用。"""
+    user_id = body.user_id or user.get("id") or user.get("user_id")
+    return envelope(
+        request,
+        await run_in_threadpool(
+            service.search,
+            query=body.query,
+            user_id=user_id,
+            top_k=body.top_k,
+            use_llm=body.use_llm,
+        ),
     )
 
 
