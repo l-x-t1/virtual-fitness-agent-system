@@ -1,0 +1,164 @@
+{
+  "version": "1.0.0",
+  "domain": "fitness_action_correction",
+  "exercises": [
+    {
+      "name": "深蹲",
+      "category": "力量训练",
+      "difficulty": 2,
+      "standard_action": "双脚与肩同宽，脚尖微外展，屈髋屈膝下蹲，膝盖跟随脚尖方向，躯干保持稳定，起身时髋膝同步伸展。",
+      "precautions": "避免膝盖明显内扣、腰背塌陷和脚跟离地。膝痛明显时降低深度或暂停负重。",
+      "muscles": ["股四头肌", "臀大肌", "臀中肌", "腘绳肌", "腹横肌"],
+      "body_parts": ["膝关节", "髋部", "核心"],
+      "equipment": ["徒手训练", "杠铃", "哑铃"],
+      "goals": ["增肌", "减脂", "综合训练", "康复"],
+      "level": "beginner",
+      "errors": [
+        {
+          "code": "squat_knee_valgus",
+          "name": "膝盖内扣",
+          "description": "下蹲或起身时膝盖向身体中线塌陷。",
+          "reason": "臀中肌和髋外旋控制不足，足弓稳定性差，或动作节奏过快。",
+          "risk_level": "high",
+          "correction": {
+            "code": "correct_hip_abduction_control",
+            "title": "加强髋外展与膝盖力线控制",
+            "solution": "降低深蹲深度，主动让膝盖对准第二脚趾，使用弹力带提示膝盖外推。",
+            "drills": "弹力带侧向走、蚌式开合、箱式深蹲、靠墙深蹲。",
+            "frequency": "每周 3 次，每次 2-3 组，每组 12-15 次。",
+            "safety_note": "若膝关节出现刺痛或肿胀，应停止训练并寻求专业评估。"
+          }
+        },
+        {
+          "code": "squat_heel_lift",
+          "name": "脚跟离地",
+          "description": "下蹲到底部时脚跟抬起，重心明显前移。",
+          "reason": "踝关节背屈活动度不足，或下蹲时髋部后坐不足。",
+          "risk_level": "medium",
+          "correction": {
+            "code": "correct_ankle_mobility",
+            "title": "改善踝关节活动度与重心控制",
+            "solution": "缩小下蹲幅度，保持全脚掌受力，训练前进行踝背屈动态活动。",
+            "drills": "膝触墙踝活动、提踵离心控制、箱式深蹲。",
+            "frequency": "训练前 5 分钟动态活动，力量训练每周 2-3 次。",
+            "safety_note": "不要为了追求深度强行压膝，优先保持稳定。"
+          }
+        }
+      ]
+    },
+    {
+      "name": "平板支撑",
+      "category": "核心训练",
+      "difficulty": 1,
+      "standard_action": "前臂支撑地面，肩肘垂直，头、胸、髋、膝、踝尽量保持一条直线，主动收紧腹部和臀部。",
+      "precautions": "避免腰部塌陷、耸肩和憋气。腰痛人群应缩短保持时间。",
+      "muscles": ["腹横肌", "臀大肌", "三角肌"],
+      "body_parts": ["核心", "肩部", "髋部"],
+      "equipment": ["瑜伽垫", "徒手训练"],
+      "goals": ["综合训练", "康复"],
+      "level": "beginner",
+      "errors": [
+        {
+          "code": "plank_lumbar_collapse",
+          "name": "腰背塌陷",
+          "description": "保持过程中骨盆前倾，腰椎明显下沉。",
+          "reason": "核心抗伸展能力不足，臀部未主动收紧，保持时间超过当前能力。",
+          "risk_level": "high",
+          "correction": {
+            "code": "correct_core_bracing",
+            "title": "建立核心支撑与骨盆控制",
+            "solution": "缩短单次支撑时间，轻微卷尾骨，收紧腹部和臀部，保持自然呼吸。",
+            "drills": "死虫、鸟狗、膝支撑平板、臀桥。",
+            "frequency": "每周 3-4 次，每次 3 组，每组 15-30 秒。",
+            "safety_note": "若出现腰椎疼痛，立即停止并改为低强度核心训练。"
+          }
+        }
+      ]
+    },
+    {
+      "name": "弓步蹲",
+      "category": "力量训练",
+      "difficulty": 2,
+      "standard_action": "前后脚分开，躯干直立下蹲，前侧膝盖跟随脚尖方向，后侧膝盖自然下沉，起身时前脚稳定发力。",
+      "precautions": "避免身体左右晃动、前膝内扣和步距过小。",
+      "muscles": ["股四头肌", "臀大肌", "臀中肌", "腘绳肌"],
+      "body_parts": ["膝关节", "髋部", "核心"],
+      "equipment": ["徒手训练", "哑铃"],
+      "goals": ["增肌", "综合训练", "康复"],
+      "level": "intermediate",
+      "errors": [
+        {
+          "code": "lunge_trunk_sway",
+          "name": "躯干晃动",
+          "description": "下蹲或起身时身体左右偏移，骨盆不稳定。",
+          "reason": "单腿稳定能力不足，核心控制不足，步距或动作速度不合适。",
+          "risk_level": "medium",
+          "correction": {
+            "code": "correct_single_leg_stability",
+            "title": "提升单腿稳定和核心控制",
+            "solution": "先扶墙或使用固定支撑，降低动作速度，保持骨盆朝正前方。",
+            "drills": "分腿蹲静止保持、台阶上步、单腿臀桥、侧桥。",
+            "frequency": "每周 2-3 次，每次 2-3 组，每组 8-12 次。",
+            "safety_note": "平衡不足时不要直接负重训练。"
+          }
+        }
+      ]
+    },
+    {
+      "name": "开合跳",
+      "category": "有氧训练",
+      "difficulty": 1,
+      "standard_action": "双脚向外跳开同时双臂上举，再跳回起始位置，落地轻柔，保持节奏稳定。",
+      "precautions": "避免膝盖内扣和落地过重。膝踝不适者可改为低冲击踏步开合。",
+      "muscles": ["股四头肌", "臀中肌", "三角肌"],
+      "body_parts": ["膝关节", "肩部"],
+      "equipment": ["徒手训练"],
+      "goals": ["减脂", "综合训练"],
+      "level": "beginner",
+      "errors": [
+        {
+          "code": "jumping_jack_hard_landing",
+          "name": "落地过重",
+          "description": "落地声音大，膝踝缓冲不足。",
+          "reason": "髋膝踝缓冲协调不足，疲劳后动作控制下降。",
+          "risk_level": "medium",
+          "correction": {
+            "code": "correct_soft_landing",
+            "title": "学习低冲击落地缓冲",
+            "solution": "降低跳跃高度，先用踏步开合替代，落地时主动屈髋屈膝。",
+            "drills": "原地小跳落地、踏步开合、提踵和踝稳定训练。",
+            "frequency": "每周 2-4 次，控制在无痛范围内。",
+            "safety_note": "体重较大或膝痛人群优先选择低冲击版本。"
+          }
+        }
+      ]
+    }
+  ],
+  "training_plans": [
+    {
+      "goal": "增肌",
+      "description": "以力量训练为主，逐步增加容量和负荷，重视动作标准和恢复。",
+      "recommendation": "每周 3-4 次力量训练，优先深蹲、推、拉、髋主导动作。"
+    },
+    {
+      "goal": "减脂",
+      "description": "结合有氧训练和基础力量训练，提高能量消耗并保持肌肉量。",
+      "recommendation": "每周 3 次力量训练加 2-3 次中低强度有氧或间歇训练。"
+    },
+    {
+      "goal": "康复",
+      "description": "以疼痛控制、活动度恢复和动作模式重建为主。",
+      "recommendation": "优先选择低冲击训练，任何动作都应在无明显疼痛范围内完成。"
+    }
+  ],
+  "user_experiences": [
+    {
+      "scenario": "深蹲时膝盖疼",
+      "knowledge": "常见原因包括膝盖内扣、踝活动度不足、训练量过大或缺少热身。应先降低强度并检查膝盖是否跟随脚尖方向。"
+    },
+    {
+      "scenario": "平板支撑腰酸",
+      "knowledge": "通常与腰背塌陷和核心支撑不足有关。建议缩短时间，改用膝支撑平板或死虫训练。"
+    }
+  ]
+}

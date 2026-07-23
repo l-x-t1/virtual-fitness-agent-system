@@ -16,11 +16,13 @@ from functools import lru_cache
 from app.graph import GraphRAG, Neo4jFitnessGraph, is_available, run_read
 from app.graph.data_import import import_all as do_import_all
 from app.graph.queries import GRAPH_STATS
+from app.graphrag import GraphRAGChain
 from app.models.graph import (
     ExerciseRecommendItem,
     GraphImportResponse,
     GraphQueryResponse,
     GraphRecommendResponse,
+    GraphSearchResponse,
     GraphStatusResponse,
     VenueRecommendItem,
 )
@@ -42,6 +44,7 @@ class GraphService:
     def __init__(self):
         self._rag: GraphRAG | None = None
         self._neo4j_graph: Neo4jFitnessGraph | None = None
+        self._search_chain: GraphRAGChain | None = None
 
     @property
     def neo4j_graph(self) -> Neo4jFitnessGraph:
@@ -54,6 +57,12 @@ class GraphService:
         if self._rag is None:
             self._rag = GraphRAG()
         return self._rag
+
+    @property
+    def search_chain(self) -> GraphRAGChain:
+        if self._search_chain is None:
+            self._search_chain = GraphRAGChain()
+        return self._search_chain
 
     # ---- 推荐接口（核心） ----
 
@@ -196,6 +205,26 @@ class GraphService:
             )
 
     # ---- 状态 ----
+
+    def search(
+        self,
+        query: str,
+        user_id: int | None = None,
+        top_k: int = 8,
+        use_llm: bool = True,
+    ) -> GraphSearchResponse:
+        chain = self.search_chain
+        chain.use_llm = use_llm
+        result = chain.invoke(query, user_id=user_id, limit=top_k)
+        return GraphSearchResponse(
+            query=result.get("query", query),
+            knowledge=result.get("knowledge", []),
+            relations=result.get("relations", []),
+            answer=result.get("answer", ""),
+            context=result.get("context", ""),
+            keywords=result.get("keywords", []),
+            used_llm=bool(result.get("used_llm", False)),
+        )
 
     def status(self) -> GraphStatusResponse:
         available = is_available()
