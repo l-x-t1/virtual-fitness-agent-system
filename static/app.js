@@ -4769,7 +4769,7 @@ async function handleAdminButton(button) {
 }
 
 function bindEvents() {
-  document.querySelectorAll(".nav").forEach((button) => {
+  document.querySelectorAll(".nav[data-view]").forEach((button) => {
     button.addEventListener("click", () => {
       showView(button.dataset.view);
       focusAdminSection(button);

@@ -89,3 +89,32 @@ python test_agents.py
 ```
 
 该脚本使用模拟用户、训练历史和 MediaPipe 姿态数据，不依赖真实数据库或线上 API Key。
+
+## AI 对话教练（人员 C）
+
+登录系统后访问 `http://127.0.0.1:8765/ai-coach`。该模块独立提供：
+
+- DeepSeek 与阿里云百炼兼容接口，可在页面按会话切换供应商和模型。
+- 多轮上下文、会话列表和会话状态；消息独立保存到 SQLite，默认保留 30 天。
+- 基于身体数据和训练历史的画像，包含频率、时长、平均分、强弱动作和成绩趋势。
+- 结构化个性化训练卡，以及按伤病风险选择低冲击替代动作。
+- 24 条内置健身资料和独立 FAISS 检索；FAISS 不可用时自动使用关键词检索。
+- 管理员可通过 `/api/ai/knowledge/import` 批量导入自定义 JSON 健身资料。
+- Chrome/Edge 浏览器 Web Speech API 语音输入和语音播报。
+- 没有任何 AI API Key 时自动进入降级演示模式。
+- 页面可直接测试当前 DeepSeek／百炼模型连接并显示延迟或错误。
+
+人员 C 使用独立配置，不依赖知识图谱服务：
+
+```text
+AI_LLM_PROVIDER=deepseek
+AI_MODEL_NAME=deepseek-v4-flash
+AI_DEEPSEEK_API_KEY=
+
+# 或在页面选择阿里云百炼
+AI_DASHSCOPE_API_KEY=
+```
+
+主要接口：`GET /api/ai/status`、`POST/GET /api/ai/sessions`、`POST /api/ai/chat`、
+`GET /api/ai/profile`、`POST /api/ai/plans`、`POST /api/ai/corrections`、
+`GET /api/ai/knowledge`、`POST /api/ai/knowledge/import`、`POST /api/ai/providers/test`。
