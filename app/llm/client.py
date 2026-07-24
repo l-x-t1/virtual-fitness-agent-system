@@ -54,6 +54,7 @@ class LLMClient:
                 base_url=self.config.base_url,
                 temperature=self.temperature,
                 timeout=self.timeout,
+                max_retries=1,
             )
         return self._model
 

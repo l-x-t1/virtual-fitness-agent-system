@@ -1,0 +1,16 @@
+# prometheus.yml — Prometheus 抓取配置
+# docker run -d -p 9090:9090 -v ./prometheus.yml:/etc/prometheus/prometheus.yml prom/prometheus
+
+global:
+  scrape_interval: 15s
+  evaluation_interval: 15s
+
+scrape_configs:
+  - job_name: "fitness-api"
+    metrics_path: /metrics
+    static_configs:
+      - targets: ["fitness-app:8765"]
+    relabel_configs:
+      - source_labels: [__address__]
+        target_label: instance
+        replacement: "fitness-api"

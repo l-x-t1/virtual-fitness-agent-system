@@ -146,3 +146,37 @@ async def roles(request: Request, admin=Depends(require_admin)):
 @router.post("/role")
 async def save_role(body: RoleSave, request: Request, admin=Depends(require_admin)):
     return await invoke(request, admin, "save_role", body.model_dump(exclude_none=True))
+
+
+# ============================================================
+# FeatureFlag 管理接口
+# ============================================================
+
+@router.get("/features", summary="特性开关列表")
+async def feature_list(request: Request, admin=Depends(require_admin)):
+    from app.feature_flags.service import get_feature_flag_service
+    ff = get_feature_flag_service()
+    return envelope(request, {"features": ff.list_all()})
+
+
+@router.get("/features/{feature_name}", summary="检查特性对特定用户的放量状态")
+async def feature_check(feature_name: str, user_id: int, request: Request, admin=Depends(require_admin)):
+    from app.feature_flags.service import get_feature_flag_service
+    ff = get_feature_flag_service()
+    return envelope(request, {
+        "feature": feature_name,
+        "user_id": user_id,
+        "enabled": ff.is_enabled(feature_name, user_id),
+        "percentage": ff.get_percentage(feature_name),
+    })
+
+
+@router.post("/features/{feature_name}", summary="设置特性放量百分比")
+async def feature_set(feature_name: str, percentage: int = 0, request: Request = None, admin=Depends(require_admin)):
+    from app.feature_flags.service import get_feature_flag_service
+    ff = get_feature_flag_service()
+    ff.set_percentage(feature_name, percentage)
+    return envelope(request, {
+        "feature": feature_name,
+        "percentage": ff.get_percentage(feature_name),
+    })

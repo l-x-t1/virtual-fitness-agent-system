@@ -1,4 +1,5 @@
 import logging
+import os
 import time
 from contextlib import asynccontextmanager
 from pathlib import Path
@@ -14,6 +15,9 @@ from agents import AgentCoordinator
 from app.controllers import admin, ai, auth, graph, training, users, venues, websocket
 from app.core.config import settings
 from app.core.exceptions import AppError
+from app.core.logging_config import setup_logging
+from app.middleware.rate_limit import RateLimitMiddleware
+from app.middleware.feature_flag import FeatureFlagMiddleware
 from app.services import fitness_service
 from database import init_db
 
@@ -23,9 +27,22 @@ BASE_DIR = Path(__file__).resolve().parent.parent
 
 @asynccontextmanager
 async def lifespan(application: FastAPI):
+    setup_logging(
+        level=os.getenv("LOG_LEVEL", "INFO"),
+        log_dir=os.getenv("LOG_DIR"),
+        json_format=os.getenv("LOG_JSON", "").lower() == "true",
+    )
     init_db()
     application.state.coordinator = AgentCoordinator()
     fitness_service.coordinator = application.state.coordinator
+
+    # OpenTelemetry（可选，未安装则跳过）
+    try:
+        from app.middleware.tracing import setup_tracing
+        setup_tracing(application)
+    except Exception:
+        pass
+
     yield
 
 
@@ -41,6 +58,18 @@ app.add_middleware(
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
+)
+app.add_middleware(
+    RateLimitMiddleware,
+    redis_url=settings.redis_url,
+    default_limit=60,
+    default_window=60,
+)
+app.add_middleware(
+    FeatureFlagMiddleware,
+    protected_routes={
+        "/api/graph/search": "graph_search",
+    },
 )
 
 
@@ -100,3 +129,13 @@ app.mount("/static", StaticFiles(directory=BASE_DIR / "static"), name="static")
 @app.get("/", include_in_schema=False)
 async def index():
     return FileResponse(BASE_DIR / "templates" / "index.html")
+
+
+@app.get("/health", include_in_schema=False)
+async def health():
+    try:
+        from app.graph.neo4j_client import is_available
+        neo4j_ok = is_available()
+    except Exception:
+        neo4j_ok = False
+    return {"status": "ok", "neo4j": neo4j_ok}
