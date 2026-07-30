@@ -1,213 +1,160 @@
+"""Legacy-compatible adapters for the structured agents in :mod:`app.agents`.
+
+Database and graph access stay in this compatibility layer.  The reusable agent
+implementations under ``app/agents`` only operate on caller-provided data.
+"""
+
+from __future__ import annotations
+
+import asyncio
 import json
 import logging
+from typing import Any
 
-from app.agents import BaseAgent
-from app.agents.embedding_store import ExerciseVectorStore
-from app.agents.mediapipe_adapter import MediaPipeAdapter
-from app.agents.schemas import EvaluateOutput, MotivationOutput, ProfileOutput, RecommendOutput, ReportOutput
+from app.agents import (
+    EvaluateAgent as StructuredEvaluateAgent,
+    MotivationAgent as StructuredMotivationAgent,
+    ProfileAgent as StructuredProfileAgent,
+    RecommendAgent as StructuredRecommendAgent,
+    ReportAgent as StructuredReportAgent,
+)
 from app.cache import cache_get_or_set
 from app.cache import cache_keys
 from app.repositories import FitnessRepository, session_scope
-from app.llm.client import LLMConfigurationError
 from knowledge_graph import FitnessKnowledgeGraph
 
 logger = logging.getLogger(__name__)
 
 
-class ProfileAgent(BaseAgent):
-    prompt_module = "app.agents.prompts.profile_prompt"
-    output_schema = ProfileOutput
+class ProfileAgent(StructuredProfileAgent):
+    """Keep the dashboard's historical string summary API."""
+
+    def summarize_structured(
+        self,
+        user: dict[str, Any],
+        history: list[dict[str, Any]] | None = None,
+        behavior: list[Any] | None = None,
+    ) -> dict[str, Any]:
+        return super().summarize(user, history=history, behavior=behavior)
 
     def summarize(self, user):
-        try:
-            result = self.run({"user_info": user, "history": [], "behavior": []})
-            profile = result["profile"]
-            return (
-                f"{user.get('nickname', '用户')}，{user.get('age', 20)} 岁。"
-                f"体能水平：{profile.get('fitness_level') or user.get('fitness_level', '未评估')}；"
-                f"运动偏好：{profile.get('preference') or user.get('preference', '综合训练')}；"
-                f"训练目标：{profile.get('goal') or '逐步提升运动表现'}；"
-                f"风险提示：{profile.get('risk') or '低风险'}。"
-            )
-        except (LLMConfigurationError, ValueError, RuntimeError) as exc:
-            logger.info("ProfileAgent LLM path skipped: %s", exc)
-            return self._fallback_summary(user)
-
-    def _fallback_summary(self, user):
-        injury_text = user.get("injuries") or "暂无"
-        level_map = {"beginner": "新手", "intermediate": "进阶", "advanced": "熟练"}
-        level = level_map.get(user.get("fitness_level"), user.get("fitness_level") or "未评估")
-        return (
-            f"{user.get('nickname', '用户')}，{user.get('age', 20)} 岁，"
-            f"体能水平为{level}。运动偏好：{user.get('preference') or '综合训练'}；"
-            f"伤病史：{injury_text}。"
+        result = self.summarize_structured(user)
+        profile = result["profile"]
+        summary = (
+            f"{user.get('nickname', '用户')}，{user.get('age', 20)} 岁。"
+            f"体能水平：{profile['fitness_level']}；"
+            f"运动偏好：{'、'.join(profile['preferences']) or '信息不足'}；"
+            f"训练目标：{'、'.join(profile['goals']) or '信息不足'}；"
+            f"风险提示：{'、'.join(profile['risk_flags']) or '未发现输入中的明确风险'}。"
         )
+        if result["mode"] == "fallback":
+            summary += "（fallback：未调用在线模型）"
+        return summary
 
 
-class MotionAgent(BaseAgent):
-    prompt_module = "app.agents.prompts.evaluate_prompt"
-    output_schema = EvaluateOutput
+class MotionAgent(StructuredEvaluateAgent):
+    """Preserve ``(score, feedback)`` while exposing structured evaluation."""
 
-    def __init__(self, *args, **kwargs):
-        super().__init__(*args, **kwargs)
-        self.pose_adapter = MediaPipeAdapter()
+    def evaluate_structured(self, exercise_name, raw_score, pose_data=None):
+        return super().evaluate(exercise_name, raw_score, pose_data)
 
     def evaluate(self, exercise_name, raw_score, pose_data=None):
-        score = max(0, min(100, int(raw_score)))
-        motion_features = self.pose_adapter.to_features(pose_data, fallback_score=score)
-        try:
-            result = self.run({
-                "exercise_name": exercise_name,
-                "raw_score": score,
-                "motion_features": motion_features,
-            })
-            evaluation = result["evaluation"]
-            llm_score = self._safe_score(evaluation.get("score"), score)
-            feedback = self._format_feedback(evaluation)
-            return llm_score, feedback
-        except (LLMConfigurationError, ValueError, RuntimeError) as exc:
-            logger.info("MotionAgent LLM path skipped: %s", exc)
-            return self._fallback_evaluate(exercise_name, score)
-
-    def pose_features(self, pose_data, fallback_score=0):
-        return self.pose_adapter.to_features(pose_data, fallback_score=fallback_score)
-
-    def _fallback_evaluate(self, exercise_name, score):
-        score = max(0, min(100, int(score)))
-        if score >= 90:
-            feedback = "动作标准度优秀，可以适当增加节奏或组数。"
-        elif score >= 75:
-            feedback = "动作基本达标，继续保持核心稳定和呼吸节奏。"
-        elif score >= 60:
-            feedback = "动作存在偏差，建议降低速度重试。"
-        else:
-            feedback = "动作风险较高，请暂停进阶挑战，优先进行分解练习。"
-        if exercise_name in {"深蹲", "弓步蹲", "节奏冲刺"} and score < 80:
-            feedback += " 重点检查膝盖方向、髋部下沉幅度与躯干稳定。"
-        if exercise_name == "平板支撑" and score < 80:
-            feedback += " 注意肩、髋、踝保持一条直线。"
-        if exercise_name == "开合跳" and score < 80:
-            feedback += " 落地时保持轻缓，膝盖与脚尖方向一致。"
-        return score, feedback
-
-    def _format_feedback(self, evaluation):
-        mistakes = [item for item in evaluation.get("mistakes", []) if item]
-        suggestions = [item for item in evaluation.get("suggestions", []) if item]
+        result = self.evaluate_structured(exercise_name, raw_score, pose_data)
+        evaluation = result["evaluation"]
+        mistakes = [item for item in evaluation["mistakes"] if item]
+        suggestions = [item for item in evaluation["suggestions"] if item]
         parts = []
         if mistakes:
             parts.append("主要问题：" + "；".join(mistakes))
         if suggestions:
             parts.append("建议：" + "；".join(suggestions))
-        return "。".join(parts) or "动作表现稳定，继续保持当前训练节奏。"
-
-    def _safe_score(self, value, default):
-        try:
-            return int(round(max(0, min(100, float(value)))))
-        except (TypeError, ValueError):
-            return default
+        feedback = "。".join(parts) or "当前可用特征未发现明确动作问题。"
+        if result["mode"] == "fallback":
+            feedback = "fallback（未调用在线模型）：" + feedback
+        return int(round(evaluation["score"])), feedback
 
 
-class RecommendAgent(BaseAgent):
-    prompt_module = "app.agents.prompts.recommend_prompt"
-    output_schema = RecommendOutput
+class RecommendAgent(StructuredRecommendAgent):
+    """Add the existing graph/venue integration around the pure recommendation agent."""
 
     def __init__(self, *args, **kwargs):
         super().__init__(*args, **kwargs)
         try:
             from app.graph.neo4j_fitness_graph import Neo4jFitnessGraph
+
             self.graph = Neo4jFitnessGraph()
             logger.info("RecommendAgent using Neo4j graph")
         except Exception:
             self.graph = FitnessKnowledgeGraph()
             logger.info("RecommendAgent using lightweight graph (Neo4j unavailable)")
-        self.vector_store = ExerciseVectorStore()
+
+    def recommend_structured(
+        self,
+        user: dict[str, Any],
+        exercise_name: str | None = None,
+        history: list[dict[str, Any]] | None = None,
+    ) -> dict[str, Any]:
+        self.graph.refresh()
+        return super().recommend(
+            user,
+            knowledge_base=list(self.graph.exercises),
+            history=history or [],
+            current_exercise=exercise_name,
+            top_k=5,
+        )
 
     def recommend(self, user, exercise_name=None):
         self.graph.refresh()
         graph_exercises = self.graph.recommend_exercises(user)
-        exercises = self._rag_candidates(user, graph_exercises, exercise_name)
+        structured = StructuredRecommendAgent.recommend(
+            self,
+            user,
+            knowledge_base=list(self.graph.exercises),
+            history=[],
+            current_exercise=exercise_name,
+            top_k=5,
+        )
         venues = self.graph.recommend_venues(user, exercise_name)
-        try:
-            result = self.run({
-                "profile": user,
-                "history": [],
-                "current_exercise": exercise_name,
-                "retrieval_context": [item.get("rag_context") for item in exercises if item.get("rag_context")],
-                "candidates": [
-                    {
-                        "name": item.get("name"),
-                        "category": item.get("category"),
-                        "difficulty": item.get("difficulty"),
-                        "target": item.get("target"),
-                        "equipment": item.get("equipment"),
-                        "reason": item.get("reason"),
-                        "score": item.get("match_score"),
-                    }
-                    for item in exercises
-                ],
-            })
-            exercises = self._merge_llm_recommendations(exercises, result.get("recommendations", []))
-        except (LLMConfigurationError, ValueError, RuntimeError) as exc:
-            logger.info("RecommendAgent LLM path skipped: %s", exc)
-        return {"exercises": exercises, "venues": venues}
+        graph_by_name = {item.get("name"): item for item in self.graph.exercises}
+        graph_by_name.update({item.get("name"): item for item in graph_exercises})
+        exercises = []
+        for recommendation in structured["recommendations"]:
+            base = graph_by_name.get(recommendation["name"], {})
+            exercises.append(
+                {
+                    **base,
+                    "name": recommendation["name"],
+                    "match_score": recommendation["score"],
+                    "reason": recommendation["reason"],
+                    "risk_warning": recommendation["risk_warning"],
+                }
+            )
+        return {
+            "exercises": exercises,
+            "venues": venues,
+            **{key: value for key, value in structured.items() if key != "recommendations"},
+        }
 
-    def _rag_candidates(self, user, graph_exercises, exercise_name):
-        try:
-            vector_exercises = self.vector_store.search(user, self.graph.exercises, exercise_name, top_k=5)
-        except RuntimeError as exc:
-            logger.info("RecommendAgent FAISS path skipped: %s", exc)
-            return graph_exercises
-
-        if not vector_exercises:
-            return graph_exercises
-
-        merged = []
-        used = set()
-        graph_by_name = {item.get("name"): item for item in graph_exercises}
-        for item in vector_exercises:
-            name = item.get("name")
-            if not name:
-                continue
-            base = graph_by_name.get(name, item)
-            merged.append({
-                **base,
-                "rag_score": item.get("rag_score"),
-                "rag_context": item.get("rag_context"),
-                "match_score": max(float(base.get("match_score") or 0), float(item.get("rag_score") or 0)),
-            })
-            used.add(name)
-        merged.extend(item for item in graph_exercises if item.get("name") not in used)
-        return merged[:5]
-
-    def _merge_llm_recommendations(self, exercises, recommendations):
-        by_name = {item.get("name"): item for item in exercises}
-        ranked = []
-        used = set()
-        for recommendation in recommendations:
-            name = recommendation.get("name")
-            if name not in by_name:
-                continue
-            score = recommendation.get("score")
-            item = {
-                **by_name[name],
-                "reason": recommendation.get("reason") or by_name[name].get("reason"),
-                "match_score": self._safe_score(score, by_name[name].get("match_score")),
-            }
-            ranked.append(item)
-            used.add(name)
-        ranked.extend(item for item in exercises if item.get("name") not in used)
-        return ranked[:5]
-
-    def _safe_score(self, value, default):
-        try:
-            return round(max(0, min(100, float(value))), 1)
-        except (TypeError, ValueError):
-            return default
+    async def arecommend(
+        self,
+        user: dict[str, Any],
+        exercise_name: str | None = None,
+        history: list[dict[str, Any]] | None = None,
+    ) -> dict[str, Any]:
+        self.graph.refresh()
+        return await StructuredRecommendAgent.arecommend(
+            self,
+            user,
+            knowledge_base=list(self.graph.exercises),
+            history=history or [],
+            current_exercise=exercise_name,
+            top_k=5,
+        )
 
     def today_plan(self, user, report):
         rec = self.recommend(user)
         exercises = rec["exercises"][:3]
-        average = report.get("average", 0)
+        average = report.get("average", report.get("average_score", 0))
         if user.get("fitness_level") == "beginner" or average < 75:
             intensity, duration, note = "低到中等", 18, "优先保证动作标准度。"
         elif average >= 88:
@@ -223,99 +170,116 @@ class RecommendAgent(BaseAgent):
         }
 
 
-class GameAgent(BaseAgent):
-    prompt_module = "app.agents.prompts.motivation_prompt"
-    output_schema = MotivationOutput
+class GameAgent(StructuredMotivationAgent):
+    """Keep repository point settlement outside the reusable motivation agent."""
+
+    def settle_structured(self, user, score, duration, settlement, history=None):
+        return super().settle(
+            user,
+            score,
+            duration,
+            points=settlement.get("points", 0),
+            total_points=settlement.get("total_points", 0),
+            level=settlement.get("level", 1),
+            history=history or [],
+            unlocked_levels=settlement.get("unlocked", []),
+        )
 
     def settle(self, repo: FitnessRepository, user, score, duration):
-        result = repo.settle_points(user["id"], score, duration)
-        try:
-            motivation = self.run({
-                "progress": {
-                    "score": score,
-                    "duration": duration,
-                    "points": result.get("points"),
-                    "total_points": result.get("total_points"),
-                    "level": result.get("level"),
-                },
-                "emotion": "training_completed",
-                "achievement": result.get("unlocked", []),
-            })
-            return {**result, **motivation}
-        except (LLMConfigurationError, ValueError, RuntimeError) as exc:
-            logger.info("GameAgent LLM path skipped: %s", exc)
-            return {
-                **result,
-                "message": self._fallback_message(user, score),
-                "strategy": "保持稳定训练节奏，优先保证动作质量。",
-                "next_goal": "下一次训练争取在标准动作前提下提升 3 分。",
-            }
+        settlement = repo.settle_points(user["id"], score, duration)
+        return {
+            **settlement,
+            **self.settle_structured(user, score, duration, settlement),
+        }
 
-    def _fallback_message(self, user, score):
-        nickname = user.get("nickname", "用户")
-        if score >= 90:
-            return f"{nickname}，本次动作质量很稳，可以尝试增加一组训练。"
-        if score >= 75:
-            return f"{nickname}，本次训练已经达标，继续保持节奏。"
-        return f"{nickname}，先把动作做稳，降低速度会更容易进步。"
+    async def asettle(self, repo: FitnessRepository, user, score, duration, history=None):
+        settlement = repo.settle_points(user["id"], score, duration)
+        motivation = await StructuredMotivationAgent.asettle(
+            self,
+            user,
+            score,
+            duration,
+            points=settlement.get("points", 0),
+            total_points=settlement.get("total_points", 0),
+            level=settlement.get("level", 1),
+            history=history or [],
+            unlocked_levels=settlement.get("unlocked", []),
+        )
+        return {**settlement, **motivation}
 
 
-class ReportAgent(BaseAgent):
-    prompt_module = "app.agents.prompts.report_prompt"
-    output_schema = ReportOutput
+class ReportAgent(StructuredReportAgent):
+    """Keep the historical ``user_id`` API and repository lookup."""
 
-    def build_report(self, user_id):
+    def _sessions_for(self, user_id: int) -> list[dict[str, Any]]:
         with session_scope() as session:
-            sessions = FitnessRepository(session).recent_sessions(user_id, 10)
-        if not sessions:
-            return {"average": 0, "count": 0, "summary": "暂无训练记录。", "sessions": []}
+            return FitnessRepository(session).recent_sessions(user_id, 31)
 
-        average = round(sum(item["score"] for item in sessions) / len(sessions), 1)
-        weak = min(sessions, key=lambda x: x["score"])
-        best = max(sessions, key=lambda x: x["score"])
-        trend = list(reversed([
+    def build_report_structured(
+        self,
+        training_records: list[dict[str, Any]],
+        report_type: str = "weekly",
+        profile: dict[str, Any] | None = None,
+    ) -> dict[str, Any]:
+        return super().build_report(training_records, report_type, profile)
+
+    def build_report(
+        self,
+        user_id,
+        report_type="weekly",
+        training_records=None,
+        profile=None,
+    ):
+        sessions = self._sessions_for(user_id) if training_records is None else list(training_records)
+        period_sessions = self._period_records(sessions, self._report_type(report_type))
+        structured = self.build_report_structured(
+            period_sessions, report_type, profile or {"user_id": user_id}
+        )
+        return self._legacy_report(structured, period_sessions)
+
+    async def abuild_report(
+        self,
+        user_id,
+        report_type="weekly",
+        training_records=None,
+        profile=None,
+    ):
+        if training_records is None:
+            sessions = await asyncio.to_thread(self._sessions_for, user_id)
+        else:
+            sessions = list(training_records)
+        sessions = self._period_records(sessions, self._report_type(report_type))
+        return await StructuredReportAgent.abuild_report(
+            self, sessions, report_type, profile or {"user_id": user_id}
+        )
+
+    def _legacy_report(self, structured, sessions):
+        trend = [
             {
-                "exercise_name": item["exercise_name"],
-                "score": item["score"],
-                "points": item["points"],
-                "duration": item["duration"],
-                "created_at": str(item["created_at"]),
+                "exercise_name": item.get("exercise_name"),
+                "score": item.get("score"),
+                "points": item.get("points"),
+                "duration": item.get("duration"),
+                "created_at": str(item.get("created_at", "")),
             }
-            for item in sessions[:7]
-        ]))
-        report = {
-            "average": average,
-            "count": len(sessions),
-            "weak_exercise": weak["exercise_name"],
-            "best_exercise": best["exercise_name"],
-            "summary": f"近 {len(sessions)} 次训练平均分 {average}，薄弱动作是 {weak['exercise_name']}。",
-            "suggestion": f"保持 {best['exercise_name']} 的训练优势；{weak['exercise_name']} 建议降低速度。",
+            for item in reversed(sessions[:7])
+        ]
+        return {
+            **structured,
+            "average": structured["average_score"],
+            "count": structured["training_count"],
+            "weak_exercise": (
+                structured["weaknesses"][0] if structured["weaknesses"] else None
+            ),
+            "best_exercise": (
+                structured["strengths"][0] if structured["strengths"] else None
+            ),
+            "suggestion": "；".join(structured["next_plan"]),
+            "plan": structured["next_plan"],
+            "analysis": structured["trend_analysis"],
             "trend": trend,
             "sessions": sessions,
         }
-        try:
-            generated = self.run({
-                "profile": {"user_id": user_id},
-                "recommendation": {},
-                "evaluation": {
-                    "average": average,
-                    "weak_exercise": weak["exercise_name"],
-                    "best_exercise": best["exercise_name"],
-                },
-                "history": sessions,
-            })
-            plan = generated.get("plan") or []
-            return {
-                **report,
-                "title": generated.get("title") or "训练报告",
-                "summary": generated.get("summary") or report["summary"],
-                "analysis": generated.get("analysis") or "",
-                "plan": plan,
-                "suggestion": "；".join(plan) or report["suggestion"],
-            }
-        except (LLMConfigurationError, ValueError, RuntimeError) as exc:
-            logger.info("ReportAgent LLM path skipped: %s", exc)
-            return report
 
 
 class AgentCoordinator:
@@ -358,7 +322,12 @@ class AgentCoordinator:
             game = self.game.settle(repo, user, score, duration)
             repo.add_session(user_id, exercise_name, score, duration, game["points"], feedback)
             updated_user = repo.user_by_id(user_id)
-        return {"score": score, "feedback": feedback, "game": game, "recommendations": self.recommendation.recommend(updated_user, exercise_name)}
+        return {
+            "score": score,
+            "feedback": feedback,
+            "game": game,
+            "recommendations": self.recommendation.recommend(updated_user, exercise_name),
+        }
 
     def exercises(self):
         return cache_get_or_set(cache_keys.EXERCISES, self._exercises)

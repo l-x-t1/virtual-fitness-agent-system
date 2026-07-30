@@ -1,3 +1,15 @@
-from app.llm.client import LLMClient
+from app.llm.client import (
+    LLMClient,
+    LLMConfigurationError,
+    LLMError,
+    LLMInvocationError,
+    LLMProviderConfig,
+)
 
-__all__ = ["LLMClient"]
+__all__ = [
+    "LLMClient",
+    "LLMConfigurationError",
+    "LLMError",
+    "LLMInvocationError",
+    "LLMProviderConfig",
+]

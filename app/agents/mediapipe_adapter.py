@@ -24,34 +24,56 @@ class MediaPipeAdapter:
         knee_angle = self._number(payload.get("knee_angle"))
         hip_angle = self._number(payload.get("hip_angle"))
         shoulder_balance = self._number(payload.get("shoulder_balance"))
+        left_knee_angle = None
+        right_knee_angle = None
+        left_hip_angle = None
+        right_hip_angle = None
 
         if landmarks:
-            knee_angle = knee_angle or self._average([
-                self._angle(landmarks, self.LEFT_HIP, self.LEFT_KNEE, self.LEFT_ANKLE),
-                self._angle(landmarks, self.RIGHT_HIP, self.RIGHT_KNEE, self.RIGHT_ANKLE),
-            ])
-            hip_angle = hip_angle or self._average([
-                self._angle(landmarks, self.LEFT_SHOULDER, self.LEFT_HIP, self.LEFT_KNEE),
-                self._angle(landmarks, self.RIGHT_SHOULDER, self.RIGHT_HIP, self.RIGHT_KNEE),
-            ])
-            shoulder_balance = shoulder_balance or self._balance(
-                self._point(landmarks, self.LEFT_SHOULDER),
-                self._point(landmarks, self.RIGHT_SHOULDER),
-            )
+            left_knee_angle = self._angle(landmarks, self.LEFT_HIP, self.LEFT_KNEE, self.LEFT_ANKLE)
+            right_knee_angle = self._angle(landmarks, self.RIGHT_HIP, self.RIGHT_KNEE, self.RIGHT_ANKLE)
+            left_hip_angle = self._angle(landmarks, self.LEFT_SHOULDER, self.LEFT_HIP, self.LEFT_KNEE)
+            right_hip_angle = self._angle(landmarks, self.RIGHT_SHOULDER, self.RIGHT_HIP, self.RIGHT_KNEE)
+            if knee_angle is None:
+                knee_angle = self._average([left_knee_angle, right_knee_angle])
+            if hip_angle is None:
+                hip_angle = self._average([left_hip_angle, right_hip_angle])
+            if shoulder_balance is None:
+                shoulder_balance = self._balance(
+                    self._point(landmarks, self.LEFT_SHOULDER),
+                    self._point(landmarks, self.RIGHT_SHOULDER),
+                )
 
         confidence = self._number(payload.get("confidence"))
         stability_score = self._number(payload.get("stability_score"))
         posture_score = self._posture_score(confidence, stability_score, knee_angle, hip_angle, shoulder_balance, fallback_score)
 
+        angles = {
+            "knee": self._rounded(knee_angle),
+            "hip": self._rounded(hip_angle),
+            "shoulder_balance": self._rounded(shoulder_balance),
+            "left_knee": self._rounded(left_knee_angle),
+            "right_knee": self._rounded(right_knee_angle),
+            "left_hip": self._rounded(left_hip_angle),
+            "right_hip": self._rounded(right_hip_angle),
+        }
+        available = [name for name, value in angles.items() if value is not None]
+        if stability_score is not None:
+            available.append("stability_score")
+        if confidence is not None:
+            available.append("confidence")
+        expected = ["knee", "hip", "shoulder_balance", "stability_score"]
+
         return {
-            "angle": {
-                "knee": round(knee_angle, 1) if knee_angle is not None else "",
-                "hip": round(hip_angle, 1) if hip_angle is not None else "",
-                "shoulder_balance": round(shoulder_balance, 1) if shoulder_balance is not None else "",
-            },
+            "angle": angles,
             "stability": self._stability_label(stability_score, shoulder_balance),
+            "stability_score": self._rounded(stability_score),
+            "confidence": self._rounded(confidence),
             "range": self._range_label(knee_angle, hip_angle),
             "posture_score": posture_score,
+            "available_features": available,
+            "missing_features": [name for name in expected if name not in available],
+            "landmark_count": len(landmarks),
         }
 
     def _payload(self, pose_data: dict[str, Any] | str | None) -> dict[str, Any]:
@@ -104,10 +126,12 @@ class MediaPipeAdapter:
         if isinstance(point, dict):
             x = self._number(point.get("x"))
             y = self._number(point.get("y"))
+            visibility = self._number(point.get("visibility"))
         else:
             x = self._number(getattr(point, "x", None))
             y = self._number(getattr(point, "y", None))
-        if x is None or y is None:
+            visibility = self._number(getattr(point, "visibility", None))
+        if x is None or y is None or (visibility is not None and visibility < 0.5):
             return None
         return {"x": x, "y": y}
 
@@ -170,3 +194,6 @@ class MediaPipeAdapter:
             return float(value)
         except (TypeError, ValueError):
             return None
+
+    def _rounded(self, value: float | None) -> float | None:
+        return round(value, 1) if value is not None else None
