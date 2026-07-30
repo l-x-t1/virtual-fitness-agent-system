@@ -12,7 +12,7 @@ from fastapi.responses import FileResponse, JSONResponse
 from fastapi.staticfiles import StaticFiles
 
 from agents import AgentCoordinator
-from app.controllers import admin, ai, auth, graph, training, users, venues, websocket
+from app.controllers import admin, auth, graph, training, users, venues, websocket
 from app.core.config import settings
 from app.core.exceptions import AppError
 from app.core.logging_config import setup_logging
@@ -115,6 +115,15 @@ async def unknown_error_handler(request: Request, exc: Exception):
     return JSONResponse(error_body(request, "INTERNAL_ERROR", "服务器内部错误"), 500)
 
 
+def include_optional_ai_router(application: FastAPI) -> None:
+    try:
+        from app.controllers import ai
+    except Exception as exc:
+        logger.warning("AI router is unavailable during startup: %s", exc)
+        return
+    application.include_router(ai.router)
+
+
 app.include_router(auth.router)
 app.include_router(users.router)
 app.include_router(training.router)
@@ -122,7 +131,7 @@ app.include_router(venues.router)
 app.include_router(admin.router)
 app.include_router(websocket.router)
 app.include_router(graph.router)
-app.include_router(ai.router)
+include_optional_ai_router(app)
 app.mount("/static", StaticFiles(directory=BASE_DIR / "static"), name="static")
 
 
