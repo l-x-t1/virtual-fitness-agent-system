@@ -200,6 +200,19 @@ RELATIONSHIP_DEFINITIONS: tuple[RelationshipDefinition, ...] = (
         "Correction",
         "A correction recommended for a specific record.",
     ),
+    RelationshipDefinition(
+        "DEPLOYED_AT",
+        "Equipment",
+        "Venue",
+        "Equipment is deployed at a venue.",
+    ),
+    RelationshipDefinition(
+        "RISK",
+        "Exercise",
+        "BodyPart",
+        "Exercise carries injury risk to a body part.",
+        (PropertyDefinition("level", "String", True, "Risk level: high / medium / low."),),
+    ),
 )
 
 

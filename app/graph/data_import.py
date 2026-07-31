@@ -79,6 +79,12 @@ def import_all(include_reference_data: bool = True) -> ImportStats:
         stats.knowledge_items += import_knowledge_base(client=client)
         business_stats = import_business_data(client=client)
         _merge_stats(stats, business_stats)
+
+        # 场馆器材 → 可做动作 关联（SUITABLE_FOR）
+        try:
+            stats.relationships += _link_venue_suitable_for(client)
+        except Exception as exc:  # pragma: no cover
+            stats.errors.append(f"suitable_for: {exc}")
     finally:
         client.close()
 
@@ -285,6 +291,7 @@ def import_venues_and_equipment(client: Neo4jClient) -> ImportStats:
                 MATCH (v:Venue {venue_id: $venue_id})
                 MATCH (eq:Equipment {equipment_id: $equipment_id})
                 MERGE (v)-[:HAS_EQUIPMENT {quantity: 1}]->(eq)
+                MERGE (eq)-[:DEPLOYED_AT]->(v)
                 """,
                 {"venue_id": venue["id"], "equipment_id": equipment_id},
                 readonly=False,
@@ -307,6 +314,10 @@ def import_venues_and_equipment(client: Neo4jClient) -> ImportStats:
             OPTIONAL MATCH (v:Venue {venue_id: $venue_id})
             FOREACH (_ IN CASE WHEN v IS NULL THEN [] ELSE [1] END |
                 MERGE (v)-[:HAS_EQUIPMENT {quantity: 1}]->(eq)
+            )
+            WITH eq, v
+            FOREACH (_ IN CASE WHEN v IS NULL THEN [] ELSE [1] END |
+                MERGE (eq)-[:DEPLOYED_AT]->(v)
             )
             """,
             {
@@ -416,6 +427,7 @@ def import_knowledge_base(
 
         _link_exercise_level(client, exercise["name"], exercise.get("level") or "beginner")
         count += _link_exercise_body_parts(client, exercise["name"], exercise.get("body_parts", []))
+        count += _link_exercise_risk(client, exercise["name"], exercise.get("body_parts", []), exercise.get("category") or "")
         count += _link_exercise_muscles(client, exercise["name"], exercise.get("muscles", []))
         count += _link_exercise_equipment(client, exercise["name"], equipment_names)
         count += _link_exercise_goals(client, exercise["name"], exercise.get("goals", []))
@@ -465,6 +477,58 @@ def _link_exercise_body_parts(client: Neo4jClient, exercise_name: str, body_part
             readonly=False,
         )
     return len(body_parts)
+
+
+# 动作 → 身体部位 风险级别（对应 RISK 关系）。未覆盖的动作按默认级别。
+EXERCISE_RISK_LEVELS: dict[str, dict[str, str]] = {
+    "深蹲": {"膝关节": "high", "髋部": "medium", "核心": "low"},
+    "弓步蹲": {"膝关节": "high", "髋部": "medium", "核心": "low"},
+    "开合跳": {"膝关节": "high", "踝部": "medium", "核心": "low"},
+    "节奏冲刺": {"膝关节": "high", "踝部": "high", "髋部": "medium"},
+    "平板支撑": {"核心": "low", "肩部": "medium", "髋部": "low"},
+    "拳击挥击": {"肩部": "medium", "肘部": "medium"},
+    "快走": {"膝关节": "low", "踝部": "low"},
+    "动态拉伸": {"肩部": "low", "髋部": "low", "核心": "low"},
+}
+DEFAULT_RISK_LEVEL = "medium"
+
+
+def _link_exercise_risk(client: Neo4jClient, exercise_name: str, body_parts: list[str], category: str = "") -> int:
+    """创建 (Exercise)-[:RISK {level}]->(BodyPart)，供伤病风险查询使用。"""
+    levels = EXERCISE_RISK_LEVELS.get(exercise_name, {})
+    default = "high" if "有氧" in category or "冲刺" in category else DEFAULT_RISK_LEVEL
+    for body_part in body_parts:
+        level = levels.get(body_part, default)
+        client.execute_cypher(
+            """
+            MATCH (e:Exercise {name: $exercise_name})
+            MERGE (b:BodyPart {name: $body_part})
+            WITH e, b
+            MERGE (e)-[:RISK {level: $level}]->(b)
+            """,
+            {"exercise_name": exercise_name, "body_part": body_part, "level": level},
+            readonly=False,
+        )
+    return len(body_parts)
+
+
+def _link_venue_suitable_for(client: Neo4jClient) -> int:
+    """根据场馆器材与动作器材匹配，创建 (Venue)-[:SUITABLE_FOR]->(Exercise)。"""
+    result = client.execute_cypher(
+        """
+        MATCH (v:Venue)-[:HAS_EQUIPMENT]->(eq:Equipment)
+        WITH v, COLLECT(eq) AS venue_equipment
+        MATCH (e:Exercise)-[:REQUIRES]->(need:Equipment)
+        WHERE need IN venue_equipment
+        WITH DISTINCT v, e
+        MERGE (v)-[:SUITABLE_FOR {match: 1.0}]->(e)
+        RETURN COUNT(*) AS linked
+        """,
+        readonly=False,
+    )
+    if not result:
+        return 0
+    return result[0].get("linked", 0) if isinstance(result[0], dict) else 0
 
 
 def _link_exercise_muscles(client: Neo4jClient, exercise_name: str, muscles: list[str]) -> int:
