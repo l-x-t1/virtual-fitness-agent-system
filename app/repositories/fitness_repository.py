@@ -11,17 +11,26 @@ from app.cache import cache_keys
 from app.db.models import (
     AdminOperationLog,
     Badge,
+    BodyPart,
+    Challenge,
+    ChallengeRecord,
     Dictionary,
+    EnvironmentSnapshot,
     Exercise,
+    ExerciseStandard,
     FitnessEquipment,
     KnowledgeGraphEdge,
+    MotionMetric,
     PointLog,
     PoseRecord,
+    RecommendationRecord,
+    Report,
     SystemAnnouncement,
     Tip,
     TrainingSession,
     User,
     UserBadge,
+    UserProfile,
     Venue,
 )
 from app.db.session import SessionLocal
@@ -442,3 +451,234 @@ class FitnessRepository:
         if item:
             self.session.delete(item)
             cache_delete(*cache_keys.user_related(item.id), cache_keys.ADMIN_OVERVIEW)
+
+    # ------------------------------------------------------------------
+    # 身体部位（BodyPart）— 对应图谱 (Exercise)-[:INVOLVES]->(BodyPart)
+    # ------------------------------------------------------------------
+
+    def body_parts(self, limit: int | None = None) -> list[dict]:
+        stmt = select(BodyPart).order_by(BodyPart.id)
+        if limit:
+            stmt = stmt.limit(limit)
+        return rows_dict(self.session.scalars(stmt).all())
+
+    def body_part_by_name(self, name: str) -> dict | None:
+        stmt = select(BodyPart).where(BodyPart.name == name.strip())
+        return row_dict(self.session.scalar(stmt))
+
+    def save_body_part(self, name: str, description: str | None = None) -> int:
+        item = self.session.scalar(select(BodyPart).where(BodyPart.name == name.strip()))
+        if item:
+            if description:
+                item.description = description
+        else:
+            item = BodyPart(name=name.strip(), description=description)
+            self.session.add(item)
+        self.session.flush()
+        return item.id
+
+    def exercises_for_body_part(self, body_part_id: int) -> list[dict]:
+        stmt = select(Exercise).join(Exercise.body_parts).where(BodyPart.id == body_part_id)
+        return rows_dict(self.session.scalars(stmt).all())
+
+    def link_exercise_body_part(self, exercise_id: int, body_part_id: int) -> None:
+        """为动作关联身体部位（映射到图谱 INVOLVES 关系）"""
+        exercise = self.session.get(Exercise, int(exercise_id))
+        body_part = self.session.get(BodyPart, int(body_part_id))
+        if exercise and body_part and body_part not in exercise.body_parts:
+            exercise.body_parts.append(body_part)
+            self.session.flush()
+
+    # ------------------------------------------------------------------
+    # UserProfile（用户身体档案）
+    # ------------------------------------------------------------------
+
+    def profile_by_user(self, user_id: int) -> dict | None:
+        stmt = select(UserProfile).where(UserProfile.user_id == user_id)
+        return row_dict(self.session.scalar(stmt))
+
+    def save_profile(self, user_id: int, data: dict) -> int:
+        item = self.session.scalar(select(UserProfile).where(UserProfile.user_id == user_id))
+        if item is None:
+            item = UserProfile(user_id=user_id, **{k: data[k] for k in ("height_cm", "weight_kg", "bmi", "weekly_goal", "risk_level", "preferred_time") if k in data})
+            self.session.add(item)
+        else:
+            for key in ("height_cm", "weight_kg", "bmi", "weekly_goal", "risk_level", "preferred_time"):
+                if key in data:
+                    setattr(item, key, data[key])
+        self.session.flush()
+        return item.id
+
+    # ------------------------------------------------------------------
+    # ExerciseStandard（动作标准指标）
+    # ------------------------------------------------------------------
+
+    def exercise_standards(self, exercise_id: int | None = None) -> list[dict]:
+        stmt = select(ExerciseStandard).order_by(ExerciseStandard.id)
+        if exercise_id:
+            stmt = stmt.where(ExerciseStandard.exercise_id == exercise_id)
+        return rows_dict(self.session.scalars(stmt).all())
+
+    def save_exercise_standard(self, data: dict) -> int:
+        item = self.session.get(ExerciseStandard, int(data["id"])) if data.get("id") else None
+        fields = ("exercise_id", "metric_name", "ideal_value", "min_value", "max_value", "unit", "risk_hint")
+        if item:
+            for key in fields:
+                if key in data:
+                    setattr(item, key, data[key])
+        else:
+            item = ExerciseStandard(**{key: data.get(key) for key in fields})
+            self.session.add(item)
+        self.session.flush()
+        return item.id
+
+    # ------------------------------------------------------------------
+    # MotionMetric（单次训练的运动学指标）
+    # ------------------------------------------------------------------
+
+    def motion_metrics(self, session_id: int | None = None) -> list[dict]:
+        stmt = select(MotionMetric).order_by(MotionMetric.id)
+        if session_id:
+            stmt = stmt.where(MotionMetric.session_id == session_id)
+        return rows_dict(self.session.scalars(stmt).all())
+
+    def save_motion_metric(self, data: dict) -> int:
+        item = MotionMetric(
+            session_id=int(data["session_id"]),
+            metric_name=data["metric_name"],
+            metric_value=float(data["metric_value"]),
+            score=int(data["score"]) if data.get("score") is not None else None,
+            status=data.get("status"),
+            correction_advice=data.get("correction_advice"),
+        )
+        self.session.add(item)
+        self.session.flush()
+        return item.id
+
+    # ------------------------------------------------------------------
+    # EnvironmentSnapshot（场地环境快照）
+    # ------------------------------------------------------------------
+
+    def environment_snapshots(self, venue_id: int | None = None, limit: int | None = None) -> list[dict]:
+        stmt = select(EnvironmentSnapshot).order_by(EnvironmentSnapshot.captured_at.desc())
+        if venue_id:
+            stmt = stmt.where(EnvironmentSnapshot.venue_id == venue_id)
+        if limit:
+            stmt = stmt.limit(limit)
+        return rows_dict(self.session.scalars(stmt).all())
+
+    def save_environment_snapshot(self, data: dict) -> int:
+        item = EnvironmentSnapshot(
+            venue_id=int(data["venue_id"]),
+            crowd_index=int(data["crowd_index"]),
+            air_quality=int(data["air_quality"]),
+            temperature=float(data["temperature"]),
+            weather=data["weather"],
+        )
+        self.session.add(item)
+        self.session.flush()
+        return item.id
+
+    # ------------------------------------------------------------------
+    # RecommendationRecord（推荐记录，供 GraphRAG 追溯）
+    # ------------------------------------------------------------------
+
+    def recommendation_records(self, user_id: int | None = None, limit: int | None = None) -> list[dict]:
+        stmt = select(RecommendationRecord).order_by(RecommendationRecord.created_at.desc())
+        if user_id:
+            stmt = stmt.where(RecommendationRecord.user_id == user_id)
+        if limit:
+            stmt = stmt.limit(limit)
+        return rows_dict(self.session.scalars(stmt).all())
+
+    def save_recommendation_record(self, data: dict) -> int:
+        item = RecommendationRecord(
+            user_id=int(data["user_id"]),
+            recommendation_type=data["recommendation_type"],
+            target_id=int(data["target_id"]),
+            target_name=data["target_name"],
+            match_score=float(data["match_score"]),
+            reason=data.get("reason"),
+            agent_name=data.get("agent_name"),
+        )
+        self.session.add(item)
+        self.session.flush()
+        return item.id
+
+    # ------------------------------------------------------------------
+    # ChallengeRecord（挑战完成记录）
+    # ------------------------------------------------------------------
+
+    def challenge_records(self, user_id: int | None = None, status: str | None = None) -> list[dict]:
+        stmt = select(ChallengeRecord).order_by(ChallengeRecord.completed_at.desc())
+        if user_id:
+            stmt = stmt.where(ChallengeRecord.user_id == user_id)
+        if status:
+            stmt = stmt.where(ChallengeRecord.status == status)
+        return rows_dict(self.session.scalars(stmt).all())
+
+    def save_challenge_record(self, data: dict) -> int:
+        item = self.session.get(ChallengeRecord, int(data["id"])) if data.get("id") else None
+        fields = ("user_id", "challenge_id", "session_id", "status", "score", "combo_count", "completed_at")
+        if item:
+            for key in fields:
+                if key in data:
+                    setattr(item, key, data[key])
+        else:
+            item = ChallengeRecord(**{key: data.get(key) for key in fields})
+            self.session.add(item)
+        self.session.flush()
+        return item.id
+
+    # ------------------------------------------------------------------
+    # Report（训练报告）
+    # ------------------------------------------------------------------
+
+    def reports(self, user_id: int | None = None, limit: int | None = None) -> list[dict]:
+        stmt = select(Report).order_by(Report.generated_at.desc())
+        if user_id:
+            stmt = stmt.where(Report.user_id == user_id)
+        if limit:
+            stmt = stmt.limit(limit)
+        return rows_dict(self.session.scalars(stmt).all())
+
+    def latest_report(self, user_id: int) -> dict | None:
+        stmt = select(Report).where(Report.user_id == user_id).order_by(Report.generated_at.desc()).limit(1)
+        return row_dict(self.session.scalar(stmt))
+
+    def save_report(self, data: dict) -> int:
+        item = Report(
+            user_id=int(data["user_id"]),
+            report_type=data["report_type"],
+            session_count=int(data.get("session_count", 0)),
+            average_score=float(data.get("average_score", 0)),
+            weak_exercise=data.get("weak_exercise"),
+            summary=data["summary"],
+            suggestion=data.get("suggestion"),
+        )
+        self.session.add(item)
+        self.session.flush()
+        return item.id
+
+    # ------------------------------------------------------------------
+    # Challenge（挑战定义）
+    # ------------------------------------------------------------------
+
+    def challenges(self, limit: int | None = None) -> list[dict]:
+        stmt = select(Challenge).order_by(Challenge.difficulty, Challenge.id)
+        if limit:
+            stmt = stmt.limit(limit)
+        return rows_dict(self.session.scalars(stmt).all())
+
+    def save_challenge(self, data: dict) -> int:
+        item = self.session.get(Challenge, int(data["id"])) if data.get("id") else None
+        fields = ("title", "exercise_name", "goal_text", "difficulty", "reward_points", "scene")
+        if item:
+            for key in fields:
+                if key in data:
+                    setattr(item, key, data[key])
+        else:
+            item = Challenge(**{key: data.get(key) for key in fields})
+            self.session.add(item)
+        self.session.flush()
+        return item.id

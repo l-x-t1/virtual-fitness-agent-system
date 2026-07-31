@@ -1,4 +1,18 @@
-from sqlalchemy import Boolean, Date, DateTime, Float, ForeignKey, Index, Integer, String, Text, UniqueConstraint, func
+from sqlalchemy import (
+    Boolean,
+    Column,
+    Date,
+    DateTime,
+    Float,
+    ForeignKey,
+    Index,
+    Integer,
+    String,
+    Table,
+    Text,
+    UniqueConstraint,
+    func,
+)
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from app.db.base import Base
@@ -38,6 +52,16 @@ class UserProfile(Base):
     updated_at: Mapped[object] = mapped_column(DateTime, server_default=func.now(), onupdate=func.now())
 
 
+# 动作 ↔ 身体部位 多对多关联表（对应图谱 (Exercise)-[:INVOLVES]->(BodyPart)）
+# 需定义在 Exercise 之前，供其 relationship secondary 引用
+exercise_body_parts = Table(
+    "exercise_body_parts",
+    Base.metadata,
+    Column("exercise_id", ForeignKey("exercises.id", ondelete="CASCADE"), primary_key=True),
+    Column("body_part_id", ForeignKey("body_parts.id", ondelete="CASCADE"), primary_key=True),
+)
+
+
 class Exercise(Base):
     __tablename__ = "exercises"
 
@@ -49,7 +73,22 @@ class Exercise(Base):
     equipment: Mapped[str] = mapped_column(String(255), nullable=False)
     standard_json: Mapped[str] = mapped_column(Text, nullable=False)
 
+    body_parts = relationship("BodyPart", secondary=exercise_body_parts, back_populates="exercises")
+
     __table_args__ = (Index("idx_exercises_category", "category", "difficulty"),)
+
+
+class BodyPart(Base):
+    """身体部位：膝关节、髋部、核心、肩部等（对应图谱 BodyPart 节点）"""
+
+    __tablename__ = "body_parts"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    name: Mapped[str] = mapped_column(String(100), unique=True, nullable=False, index=True)
+    description: Mapped[str | None] = mapped_column(Text)
+    created_at: Mapped[object] = mapped_column(DateTime, server_default=func.now())
+
+    exercises = relationship("Exercise", secondary=exercise_body_parts, back_populates="body_parts")
 
 
 class ExerciseStandard(Base):
