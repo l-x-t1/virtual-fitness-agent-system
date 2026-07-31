@@ -9,3 +9,5 @@ server.log
 server.err.log
 tmp_server.out.log
 tmp_server.err.log
+# 含 AuraDB 密码的文档，不要推 GitHub
+docs/队友连接AuraDB指南.md
