@@ -223,7 +223,7 @@ def is_available() -> bool:
         return True
     except Exception as exc:
         logger.info("Neo4j is unavailable: %s", exc)
-        _disabled = True
+        # 连接失败不置为永久禁用，仅缓存本次结果，间隔后自动重试
         _last_available = False
         return False
 
