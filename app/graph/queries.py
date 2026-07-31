@@ -132,8 +132,85 @@ LIMIT $limit
 """
 
 # ============================================================
-# 4. 场地推荐（按用户位置 + 动作器材需求）
+# 3.5 风险感知推荐（伤病 → 部位 → 动作）
 # ============================================================
+
+RECOMMEND_WITH_RISK_FILTER = """
+// 输入: $user_id, $risky_body_parts (list, 可为空), $limit (默认5)
+// 按用户目标推荐，动作对用户受伤部位有 RISK 关系时按风险级别降权
+MATCH (u:User {user_id: $user_id})
+MATCH (u)-[:PREFERS]->(g:Goal)
+MATCH (e:Exercise)-[:ACHIEVES]->(g)
+WHERE u.fitness_level = 'advanced'
+   OR (u.fitness_level = 'intermediate' AND e.difficulty <= 2)
+   OR (u.fitness_level = 'beginner' AND e.difficulty <= 1)
+OPTIONAL MATCH (e)-[r:RISK]->(b:BodyPart)
+WHERE b.name IN $risky_body_parts
+WITH e, g, u, COLLECT(r) AS risk_rels, COLLECT(b.name) AS risky_parts
+WITH e, g, u, risk_rels, risky_parts,
+     CASE
+       WHEN ANY(rl IN [rr IN risk_rels WHERE rr IS NOT NULL | rr.level] WHERE rl = 'high') THEN -50
+       WHEN ANY(rl IN [rr IN risk_rels WHERE rr IS NOT NULL | rr.level] WHERE rl = 'medium') THEN -30
+       WHEN [rr IN risk_rels WHERE rr IS NOT NULL] <> [] THEN -15
+       ELSE 0
+     END AS risk_penalty
+WITH e, g, u, risk_penalty,
+     60 + (5 - e.difficulty) * 5 + risk_penalty AS match_score
+WHERE match_score > 0
+RETURN e.name AS name, e.category AS category, e.difficulty AS difficulty,
+       e.target AS target, e.equipment AS equipment,
+       match_score, g.name AS goal_name,
+       CASE WHEN risk_penalty < 0
+            THEN '匹配目标: ' + g.name + '（注意受伤部位风险）'
+            ELSE '匹配目标: ' + g.name
+       END AS reason
+ORDER BY match_score DESC
+LIMIT $limit
+"""
+
+# ============================================================
+# 3.6 按身体部位查动作
+# ============================================================
+
+RECOMMEND_BY_BODY_PART = """
+// 输入: $body_part (如 '膝关节'), $limit
+MATCH (b:BodyPart {name: $body_part})
+MATCH (e:Exercise)-[:INVOLVES]->(b)
+OPTIONAL MATCH (e)-[r:RISK]->(b)
+WITH e, b,
+     CASE
+       WHEN r.level = 'high' THEN -30
+       WHEN r.level = 'medium' THEN -20
+       WHEN r.level IS NOT NULL THEN -10
+       ELSE 0
+     END AS risk_penalty
+RETURN e.name AS name, e.category AS category, e.difficulty AS difficulty,
+       e.target AS target, e.equipment AS equipment,
+       70 + risk_penalty AS match_score,
+       '涉及部位: ' + b.name AS reason
+ORDER BY match_score DESC
+LIMIT $limit
+"""
+
+# 伤病关键词 → 身体部位（用于把用户伤病史解析为高风险部位）
+INJURY_TO_BODY_PART: dict[str, str] = {
+    "膝": "膝关节",
+    "腰": "腰部",
+    "肩": "肩部",
+    "肘": "肘部",
+    "踝": "踝部",
+    "腕": "腕部",
+    "髋": "髋部",
+    "颈": "颈部",
+    "背": "背部",
+}
+
+
+def resolve_risky_body_parts(injuries: str | None) -> list[str]:
+    """把用户伤病史文本解析为高风险 BodyPart 名称列表。"""
+    if not injuries:
+        return []
+    return [part for key, part in INJURY_TO_BODY_PART.items() if key in injuries]
 
 RECOMMEND_VENUES = """
 // 输入: $user_id, $exercise_name (可选), $lat, $lon, $max_distance_m (默认80000), $limit (默认5)
@@ -288,6 +365,8 @@ QUERY_REGISTRY = {
     "recommend_by_goal": RECOMMEND_BY_GOAL,
     "recommend_by_venue": RECOMMEND_BY_VENUE,
     "recommend_hybrid": RECOMMEND_HYBRID,
+    "recommend_with_risk_filter": RECOMMEND_WITH_RISK_FILTER,
+    "recommend_by_body_part": RECOMMEND_BY_BODY_PART,
     "recommend_venues": RECOMMEND_VENUES,
     "graph_stats": GRAPH_STATS,
 }

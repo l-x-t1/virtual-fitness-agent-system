@@ -227,6 +227,52 @@ class CypherQueryService:
         )
         return {"query": query, "knowledge": [_without_none(row) for row in rows]}
 
+    def find_risky_exercises(
+        self, user_id: int, injuries: str | None = None, limit: int = DEFAULT_LIMIT
+    ) -> dict[str, Any]:
+        """根据用户伤病史，找出对其受伤部位有 RISK 关系的动作及风险级别。"""
+        risky_parts = _resolve_body_parts(injuries)
+        params = {"user_id": int(user_id), "risky_body_parts": risky_parts, "limit": _safe_limit(limit)}
+        rows = self._read(
+            """
+            MATCH (u:User {user_id: $user_id})
+            MATCH (b:BodyPart) WHERE b.name IN $risky_body_parts
+            MATCH (e:Exercise)-[r:RISK]->(b)
+            RETURN e.name AS exercise, b.name AS body_part, r.level AS risk_level,
+                   e.category AS category, e.difficulty AS difficulty,
+                   coalesce(e.precautions, '') AS precautions
+            ORDER BY CASE r.level WHEN 'high' THEN 0 WHEN 'medium' THEN 1 ELSE 2 END
+            LIMIT $limit
+            """,
+            params,
+        )
+        return {
+            "user_id": int(user_id),
+            "risky_body_parts": risky_parts,
+            "risky_exercises": [_without_none(row) for row in rows],
+        }
+
+    def find_body_part_exercises(self, body_part: str, limit: int = DEFAULT_LIMIT) -> dict[str, Any]:
+        """查询涉及指定身体部位的动作及其风险提示。"""
+        params = {"body_part": _required_text(body_part, "body_part"), "limit": _safe_limit(limit)}
+        rows = self._read(
+            """
+            MATCH (b:BodyPart {name: $body_part})
+            MATCH (e:Exercise)-[:INVOLVES]->(b)
+            OPTIONAL MATCH (e)-[r:RISK]->(b)
+            RETURN e.name AS exercise, b.name AS body_part, r.level AS risk_level,
+                   e.category AS category, e.difficulty AS difficulty,
+                   coalesce(e.precautions, '') AS precautions
+            ORDER BY CASE r.level WHEN 'high' THEN 0 WHEN 'medium' THEN 1 ELSE 2 END
+            LIMIT $limit
+            """,
+            params,
+        )
+        return {
+            "body_part": body_part,
+            "exercises": [_without_none(row) for row in rows],
+        }
+
     def _read(self, query: str, params: dict[str, Any]) -> list[dict[str, Any]]:
         try:
             return self.client.execute_cypher(query, params, readonly=True) if self.client else []
@@ -278,8 +324,45 @@ def search_training_knowledge(
     return CypherQueryService(client).search_training_knowledge(query, limit)
 
 
+def find_risky_exercises(
+    user_id: int,
+    injuries: str | None = None,
+    limit: int = DEFAULT_LIMIT,
+    client: Neo4jClient | None = None,
+) -> dict[str, Any]:
+    return CypherQueryService(client).find_risky_exercises(user_id, injuries, limit)
+
+
+def find_body_part_exercises(
+    body_part: str,
+    limit: int = DEFAULT_LIMIT,
+    client: Neo4jClient | None = None,
+) -> dict[str, Any]:
+    return CypherQueryService(client).find_body_part_exercises(body_part, limit)
+
+
 def _safe_limit(limit: int) -> int:
     return min(max(int(limit), 1), MAX_LIMIT)
+
+
+# 伤病关键词 → 身体部位（与 app.graph.queries.INJURY_TO_BODY_PART 保持一致）
+_INJURY_TO_BODY_PART: dict[str, str] = {
+    "膝": "膝关节",
+    "腰": "腰部",
+    "肩": "肩部",
+    "肘": "肘部",
+    "踝": "踝部",
+    "腕": "腕部",
+    "髋": "髋部",
+    "颈": "颈部",
+    "背": "背部",
+}
+
+
+def _resolve_body_parts(injuries: str | None) -> list[str]:
+    if not injuries:
+        return []
+    return [part for key, part in _INJURY_TO_BODY_PART.items() if key in injuries]
 
 
 def _required_text(value: str, field_name: str) -> str:

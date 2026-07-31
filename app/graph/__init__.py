@@ -13,9 +13,11 @@ from app.graph.graphrag import GraphRAG
 from app.graph.graph_schema import initialize_graph_schema, schema_summary
 from app.graph.cypher_query import (
     CypherQueryService,
+    find_body_part_exercises,
     find_correction_plan,
     find_exercise_errors,
     find_related_exercises,
+    find_risky_exercises,
     find_user_training_history,
     search_training_knowledge,
 )
@@ -44,6 +46,8 @@ __all__ = [
     "find_correction_plan",
     "find_related_exercises",
     "search_training_knowledge",
+    "find_risky_exercises",
+    "find_body_part_exercises",
     "Neo4jFitnessGraph",
     "GraphExercise",
     "GraphVenue",

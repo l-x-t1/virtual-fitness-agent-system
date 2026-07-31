@@ -20,10 +20,13 @@ from typing import Any
 
 from app.graph.neo4j_client import is_available, run_read
 from app.graph.queries import (
+    RECOMMEND_BY_BODY_PART,
     RECOMMEND_BY_GOAL,
     RECOMMEND_BY_VENUE,
     RECOMMEND_HYBRID,
     RECOMMEND_VENUES,
+    RECOMMEND_WITH_RISK_FILTER,
+    resolve_risky_body_parts,
 )
 from app.graph.schemas import (
     GraphExercise,
@@ -209,10 +212,11 @@ class GraphRAG:
         user_id = user.get("id", user.get("user_id", 0))
         lat = lat or self._resolve_lat(user)
         lon = lon or self._resolve_lon(user)
+        risky = resolve_risky_body_parts(user.get("injuries"))
 
-        # 1. 图谱规则推荐动作
+        # 1. 图谱规则推荐动作（含伤病风险降权）
         exercises = self._recommend_exercises_internal(
-            user_id=user_id, lat=lat, lon=lon, max_distance_m=max_distance_m
+            user_id=user_id, lat=lat, lon=lon, max_distance_m=max_distance_m, risky_body_parts=risky,
         )
 
         # 2. 图谱规则推荐场地
@@ -238,9 +242,10 @@ class GraphRAG:
         user_id = user.get("id", user.get("user_id", 0))
         lat = lat or self._resolve_lat(user)
         lon = lon or self._resolve_lon(user)
+        risky = resolve_risky_body_parts(user.get("injuries"))
 
         exercises = self._recommend_exercises_internal(
-            user_id=user_id, lat=lat, lon=lon, max_distance_m=max_distance_m
+            user_id=user_id, lat=lat, lon=lon, max_distance_m=max_distance_m, risky_body_parts=risky
         )
         return [
             {
@@ -295,9 +300,22 @@ class GraphRAG:
     # ---- 内部实现 ----
 
     def _recommend_exercises_internal(
-        self, user_id: int, lat: float, lon: float, max_distance_m: int
+        self, user_id: int, lat: float, lon: float, max_distance_m: int,
+        risky_body_parts: list[str] | None = None,
     ) -> list[GraphExercise]:
-        """内部：执行混合查询获取动作推荐"""
+        """内部：执行混合查询获取动作推荐（支持风险感知过滤）"""
+        # 有伤病部位时，优先走风险感知查询（RISK 关系降权）
+        if risky_body_parts:
+            try:
+                rows = run_read(
+                    RECOMMEND_WITH_RISK_FILTER,
+                    {"user_id": user_id, "risky_body_parts": risky_body_parts, "limit": 5},
+                )
+                if rows:
+                    return self._exercise_rows_to_models(rows)
+            except Exception as exc:
+                logger.warning("Risk-filtered query failed: %s", exc)
+
         try:
             rows = run_read(
                 RECOMMEND_HYBRID,
@@ -310,40 +328,33 @@ class GraphRAG:
                 },
             )
             if rows:
-                return [
-                    GraphExercise(
-                        name=row.get("name", ""),
-                        category=row.get("category", ""),
-                        difficulty=row.get("difficulty", 1),
-                        target=row.get("target", ""),
-                        equipment=row.get("equipment", ""),
-                        match_score=float(row.get("match_score", 0)),
-                        reason=row.get("reason", ""),
-                    )
-                    for row in rows
-                ]
+                return self._exercise_rows_to_models(rows)
         except Exception as exc:
             logger.warning("Hybrid query failed: %s", exc)
 
         # 回退：仅按目标推荐
         try:
             rows = run_read(RECOMMEND_BY_GOAL, {"user_id": user_id, "limit": 5})
-            return [
-                GraphExercise(
-                    name=row.get("name", ""),
-                    category=row.get("category", ""),
-                    difficulty=row.get("difficulty", 1),
-                    target=row.get("target", ""),
-                    equipment=row.get("equipment", ""),
-                    match_score=float(row.get("match_score", 0)),
-                    reason=row.get("reason", ""),
-                )
-                for row in rows
-            ]
+            return self._exercise_rows_to_models(rows)
         except Exception as exc:
             logger.warning("Goal-based query failed: %s", exc)
 
         return []
+
+    @staticmethod
+    def _exercise_rows_to_models(rows: list[dict]) -> list[GraphExercise]:
+        return [
+            GraphExercise(
+                name=row.get("name", ""),
+                category=row.get("category", ""),
+                difficulty=row.get("difficulty", 1),
+                target=row.get("target", ""),
+                equipment=row.get("equipment", ""),
+                match_score=float(row.get("match_score", 0)),
+                reason=row.get("reason", ""),
+            )
+            for row in rows
+        ]
 
     def _recommend_venues_internal(
         self, user_id: int, exercise_name: str | None,
@@ -405,9 +416,12 @@ class GraphRAG:
             return exercises
 
     def _build_rerank_prompt(self, user: dict, exercises: list[GraphExercise]) -> str:
+        risky_parts = resolve_risky_body_parts(user.get("injuries"))
+        risk_note = f"，高风险部位={','.join(risky_parts)}" if risky_parts else ""
         return "\n".join([
             "将下列候选动作为用户重新排序，返回 JSON 数组（按适合度从高到低，最多5个）。",
-            f"用户画像：体能={user.get('fitness_level','')}，偏好={user.get('preference','')}，伤病史={user.get('injuries','')}",
+            f"用户画像：体能={user.get('fitness_level','')}，偏好={user.get('preference','')}，伤病史={user.get('injuries','')}{risk_note}",
+            "注意：对伤病史中涉及的部位，降低对应动作的优先级。",
             "候选动作：",
             json.dumps([
                 {"name": e.name, "category": e.category, "difficulty": e.difficulty,
