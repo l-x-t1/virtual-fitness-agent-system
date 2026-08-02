@@ -1,98 +1,5 @@
-const state = {
-  user: null,
-  accessToken: sessionStorage.getItem("fitness_access_token") || "",
-  dashboard: null,
-  reportHistory: [],
-  admin: {
-    equipment: [],
-    venues: [],
-    knowledge: { nodes: [], edges: [] },
-    overview: null,
-    users: [],
-    userSegments: [],
-    venueRows: [],
-    logs: [],
-    auditRules: [],
-    settings: [],
-    exercises: [],
-    roles: [],
-    map: null,
-    markers: [],
-  },
-  assets: {},
-  poseLandmarker: null,
-  poseModule: null,
-  cameraVideo: null,
-  cameraStream: null,
-  cameraDeviceId: "",
-  cameraRequestId: 0,
-  modelReady: false,
-  lastVideoTime: -1,
-  poseBusy: false,
-  latestLandmarks: null,
-  lastPoseAt: 0,
-  lastLandmarkAt: 0,
-  poseScore: 82,
-  lastPoseActionAt: 0,
-  selectedExercise: "拳击挥击",
-  venueSortMode: "match",
-  venueFilterMode: "all",
-  venueSource: [],
-  venueMap: null,
-  venueMarkers: [],
-  userLocation: null,
-  locationLoading: false,
-  venueEnrichedKey: "",
-  locationWatchId: null,
-  venueRefreshTimer: null,
-  venueClockTimer: null,
-  lastVenueRefreshAt: null,
-  poseStats: {
-    frames: 0,
-    totalScore: 0,
-    bestScore: 0,
-    reps: 0,
-    targetReps: 12,
-    lastRepAt: 0,
-  },
-  run: {
-    armSwing: 0,
-    legSwing: 0,
-    cadence: 0,
-    lastStepAt: 0,
-    lastStepSide: "",
-    lastArmSide: "",
-    status: "待开始",
-  },
-  boxing: {
-    leftArm: 0,
-    rightArm: 0,
-    crouch: 0,
-    status: "待开始",
-  },
-  game: {
-    running: false,
-    score: 0,
-    combo: 0,
-    bestCombo: 0,
-    timeLeft: 60,
-    targets: [],
-    particles: [],
-    lastSpawn: 0,
-    lastFrame: 0,
-    loopId: null,
-    countdownId: null,
-    poseLoopId: null,
-    previewLoopId: null,
-    poseActive: false,
-    poseDriven: false,
-    playerLocked: false,
-    staticFrameTime: 0,
-    finished: false,
-    inputFlash: null,
-    action: "待开始",
-  },
-};
+import { state } from "./stores/appStore.js";
+import { fitnessApi } from "./services/api.js";
 
 const $ = (id) => document.getElementById(id);
 const nodesById = (id) => Array.from(document.querySelectorAll(`#${id}`));
@@ -432,33 +339,8 @@ state.assets.stretchCover = loadImage("/static/covers/cover-stretch.png");
 state.assets.coreCover = loadImage("/static/covers/cover-core.png");
 state.assets.squatCover = loadImage("/static/covers/cover-squat.png");
 
-async function api(path, options = {}) {
-  const url = new URL(path, window.location.origin);
-  url.searchParams.delete("user_id");
-  url.searchParams.delete("admin_user_id");
-  const requestOptions = { ...options };
-  if (typeof requestOptions.body === "string") {
-    try {
-      const body = JSON.parse(requestOptions.body);
-      delete body.user_id;
-      delete body.admin_user_id;
-      requestOptions.body = JSON.stringify(body);
-    } catch (_) {}
-  }
-  const headers = { "Content-Type": "application/json", ...(requestOptions.headers || {}) };
-  if (state.accessToken) headers.Authorization = `Bearer ${state.accessToken}`;
-  const response = await fetch(`${url.pathname}${url.search}`, { ...requestOptions, headers });
-  const data = await response.json();
-  if (response.status === 401) {
-    state.accessToken = "";
-    state.user = null;
-    sessionStorage.removeItem("fitness_access_token");
-    sessionStorage.removeItem("fitness_user");
-    setAuthState(false);
-  }
-  if (!response.ok) throw new Error(data.message || data.error || "请求失败");
-  return data.data;
-}
+window.addEventListener("fitness:unauthorized", () => setAuthState(false));
+
 
 function setStatus(text, tone = "") {
   const node = $("poseStatus");
@@ -643,7 +525,7 @@ async function loadDashboard(options = {}) {
     params.set("lon", state.userLocation.lon);
     params.set("location", "浏览器当前位置");
   }
-  const dashboard = await api(`/api/dashboard?${params.toString()}`);
+  const dashboard = await fitnessApi.getDashboard(params);
   state.dashboard = dashboard;
   renderNotificationSummary(dashboard.notifications || []);
   $("profileSummary").textContent = dashboard.profile_summary;
@@ -720,7 +602,7 @@ async function enrichVenueNamesForLocation(location) {
   if (state.venueEnrichedKey === key) return;
   state.venueEnrichedKey = key;
   try {
-    await api(`/api/venues/enrich?lat=${encodeURIComponent(location.lat)}&lon=${encodeURIComponent(location.lon)}&radius_km=15`);
+    await fitnessApi.enrichVenuesByLocation(location);
   } catch (error) {
     console.warn("venue name enrichment skipped", error);
   }
@@ -1605,7 +1487,7 @@ async function loadExerciseLibrary() {
   const node = $("exerciseLibrary");
   if (!node) return;
   try {
-    const data = await api("/api/exercises");
+    const data = await fitnessApi.getExercises();
     node.classList.remove("empty");
     node.innerHTML = data.exercises.map((item) => `
       <article class="library-card">
@@ -1622,10 +1504,7 @@ async function loadExerciseLibrary() {
 
 async function login() {
   try {
-    const data = await api("/api/login", {
-      method: "POST",
-      body: JSON.stringify({ username: $("username").value, password: $("password").value }),
-    });
+    const data = await fitnessApi.login({ username: $("username").value, password: $("password").value });
     setSession(data);
     if (!isAdminUser()) await loadDashboard();
     showView(isAdminUser() ? "admin" : "dashboard");
@@ -1636,13 +1515,10 @@ async function login() {
 
 async function register() {
   try {
-    const data = await api("/api/register", {
-      method: "POST",
-      body: JSON.stringify({
-        username: $("username").value,
-        password: $("password").value,
-        nickname: $("nickname").value,
-      }),
+    const data = await fitnessApi.register({
+      username: $("username").value,
+      password: $("password").value,
+      nickname: $("nickname").value,
     });
     setSession(data);
     await loadDashboard();
@@ -1655,16 +1531,13 @@ async function register() {
 async function saveProfile() {
   if (!state.user) return toast("请先登录或注册");
   const submittedProfile = profileFormData();
-  const data = await api("/api/profile", {
-    method: "POST",
-    body: JSON.stringify({
-      user_id: state.user.id,
-      age: $("age").value,
-      fitness_level: $("fitnessLevel").value,
-      injuries: $("injuries").value,
-      preference: $("preference").value,
-      location: $("location").value,
-    }),
+  const data = await fitnessApi.saveProfile({
+    user_id: state.user.id,
+    age: $("age").value,
+    fitness_level: $("fitnessLevel").value,
+    injuries: $("injuries").value,
+    preference: $("preference").value,
+    location: $("location").value,
   });
   setUser(data.user);
   state.dashboard = data.dashboard;
@@ -1681,14 +1554,11 @@ async function submitSession() {
   if (!state.user) return toast("请先登录或注册");
   const gameScore = Math.min(100, 60 + state.game.score / 36 + state.game.bestCombo * 1.4);
   const score = Math.round(Math.max(state.poseScore, gameScore));
-  const data = await api("/api/session", {
-    method: "POST",
-    body: JSON.stringify({
-      user_id: state.user.id,
-      exercise_name: state.selectedExercise || $("exerciseSelect").value,
-      score,
-      duration: $("durationInput").value,
-    }),
+  const data = await fitnessApi.submitSession({
+    user_id: state.user.id,
+    exercise_name: state.selectedExercise || $("exerciseSelect").value,
+    score,
+    duration: $("durationInput").value,
   });
   persistPoseSnapshot();
   $("startGameBtn").textContent = "重新开始";
@@ -1707,18 +1577,15 @@ async function submitSession() {
 async function persistPoseSnapshot() {
   if (!state.user) return;
   try {
-    await api("/api/pose/record", {
-      method: "POST",
-      body: JSON.stringify({
-        user_id: state.user.id,
-        exercise_name: state.selectedExercise || $("exerciseSelect").value,
-        confidence: Number(($("poseConfidence").textContent || "0").replace("%", "")),
-        stability_score: Number($("stabilityScore").textContent || 0),
-        knee_angle: null,
-        hip_angle: null,
-        shoulder_balance: Number($("stabilityScore").textContent || 0),
-        raw_landmarks_json: JSON.stringify({ source: state.modelReady ? "mediapipe" : "keyboard", score: state.poseScore }),
-      }),
+    await fitnessApi.recordPose({
+      user_id: state.user.id,
+      exercise_name: state.selectedExercise || $("exerciseSelect").value,
+      confidence: Number(($("poseConfidence").textContent || "0").replace("%", "")),
+      stability_score: Number($("stabilityScore").textContent || 0),
+      knee_angle: null,
+      hip_angle: null,
+      shoulder_balance: Number($("stabilityScore").textContent || 0),
+      raw_landmarks_json: JSON.stringify({ source: state.modelReady ? "mediapipe" : "keyboard", score: state.poseScore }),
     });
   } catch (error) {
     console.warn("pose record skipped", error);
@@ -3343,16 +3210,8 @@ async function loadAdminData() {
   }
   const adminParam = adminParams.toString();
   try {
-    const [mapData, graphData, overviewData, usersData, venuesData, settingsData, exercisesData, rolesData] = await Promise.all([
-      api(`/api/admin/equipment-map?${adminParam}`),
-      api(`/api/admin/knowledge-graph?${adminParam}`),
-      api(`/api/admin/overview?${adminParam}`),
-      api(`/api/admin/users?${adminParam}`),
-      api(`/api/admin/venues?${adminParam}`),
-      api(`/api/admin/settings?${adminParam}`),
-      api("/api/exercises"),
-      api(`/api/admin/roles?${adminParam}`),
-    ]);
+    const { mapData, graphData, overviewData, usersData, venuesData, settingsData, exercisesData, rolesData } =
+      await fitnessApi.getAdminData(adminParam);
     state.admin.equipment = mapData.equipment || [];
     state.admin.venues = mapData.venues || [];
     state.admin.knowledge = graphData || { nodes: [], edges: [] };
@@ -3394,7 +3253,7 @@ async function refreshAdminData() {
       radius_km: 15,
     });
     try {
-      await api(`/api/venues/enrich?${params.toString()}`);
+      await fitnessApi.enrichVenues(params);
     } catch (error) {
       console.warn("admin venue refresh skipped", error);
     }
@@ -3900,14 +3759,14 @@ async function submitEquipmentModal(event) {
     is_smart: data.has("is_smart"),
     description: data.get("description"),
   };
-  await api("/api/admin/equipment", { method: "POST", body: JSON.stringify(payload) });
+  await fitnessApi.saveEquipment(payload);
   closeReportModal();
   await loadAdminData();
 }
 
 async function deleteEquipment(id) {
   if (!id || !(await confirmAction("确定删除该器材吗？"))) return;
-  await api(`/api/admin/equipment/${id}`, { method: "DELETE" });
+  await fitnessApi.deleteEquipment(id);
   await loadAdminData();
 }
 
@@ -3955,28 +3814,25 @@ function showVenueFormModal(item = null) {
 async function submitVenueModal(event) {
   event.preventDefault();
   const data = new FormData(event.currentTarget);
-  await api("/api/admin/venue", {
-    method: "POST",
-    body: JSON.stringify({
-      admin_user_id: state.user.id,
-      id: data.get("id"),
-      name: data.get("name"),
-      display_name: data.get("display_name"),
-      location: data.get("location"),
-      resolved_address: data.get("resolved_address"),
-      latitude: data.get("latitude"),
-      longitude: data.get("longitude"),
-      sport_type: data.get("sport_type"),
-      kind: data.get("kind"),
-      capacity: data.get("capacity"),
-      crowd_index: data.get("crowd_index"),
-      air_quality: data.get("air_quality"),
-      open_hours: data.get("open_hours"),
-      rating: data.get("rating"),
-      facility_count: data.get("facility_count"),
-      density_score: data.get("density_score"),
-      equipment: data.get("equipment"),
-    }),
+  await fitnessApi.saveVenue({
+    admin_user_id: state.user.id,
+    id: data.get("id"),
+    name: data.get("name"),
+    display_name: data.get("display_name"),
+    location: data.get("location"),
+    resolved_address: data.get("resolved_address"),
+    latitude: data.get("latitude"),
+    longitude: data.get("longitude"),
+    sport_type: data.get("sport_type"),
+    kind: data.get("kind"),
+    capacity: data.get("capacity"),
+    crowd_index: data.get("crowd_index"),
+    air_quality: data.get("air_quality"),
+    open_hours: data.get("open_hours"),
+    rating: data.get("rating"),
+    facility_count: data.get("facility_count"),
+    density_score: data.get("density_score"),
+    equipment: data.get("equipment"),
   });
   closeReportModal();
   await loadAdminData();
@@ -3984,7 +3840,7 @@ async function submitVenueModal(event) {
 
 async function deleteVenue(id) {
   if (!id || !(await confirmAction("确定删除该场馆吗？关联器材会自动解除绑定。"))) return;
-  await api(`/api/admin/venue/${id}`, { method: "DELETE" });
+  await fitnessApi.deleteVenue(id);
   await loadAdminData();
 }
 
@@ -4355,14 +4211,14 @@ async function submitKnowledgeEdge(event) {
     weight: data.get("weight"),
     note: data.get("note"),
   };
-  await api("/api/admin/knowledge-graph", { method: "POST", body: JSON.stringify(payload) });
+  await fitnessApi.saveKnowledgeGraph(payload);
   closeReportModal();
   await loadAdminData();
 }
 
 async function deleteKnowledgeEdge(id) {
   if (!id || !(await confirmAction("确定删除该知识图谱关系吗？"))) return;
-  await api(`/api/admin/knowledge-graph/${id}`, { method: "DELETE" });
+  await fitnessApi.deleteKnowledgeEdge(id);
   await loadAdminData();
 }
 
@@ -4401,7 +4257,7 @@ async function showAdminAccountModal(userId) {
     return;
   }
   const params = new URLSearchParams({ admin_user_id: state.user.id, id: userId });
-  const data = await api(`/api/admin/user?${params.toString()}`);
+  const data = await fitnessApi.getAdminUser(params);
   const user = data.user || {};
   const stats = data.stats || {};
   const isSelf = String(user.id) === String(state.user.id);
@@ -4475,20 +4331,17 @@ async function showAdminAccountModal(userId) {
 }
 
 async function saveAdminAccountForm(form) {
-  const response = await api("/api/admin/user", {
-    method: "POST",
-    body: JSON.stringify({
-      admin_user_id: state.user.id,
-      id: form.get("id"),
-      role: form.get("role"),
-      username: form.get("username"),
-      nickname: form.get("nickname"),
-      password: form.get("password"),
-      age: form.get("age"),
-      fitness_level: form.get("fitness_level"),
-      preference: form.get("preference"),
-      location: form.get("location"),
-    }),
+  const response = await fitnessApi.saveAdminUser({
+    admin_user_id: state.user.id,
+    id: form.get("id"),
+    role: form.get("role"),
+    username: form.get("username"),
+    nickname: form.get("nickname"),
+    password: form.get("password"),
+    age: form.get("age"),
+    fitness_level: form.get("fitness_level"),
+    preference: form.get("preference"),
+    location: form.get("location"),
   });
   return response.user;
 }
@@ -4496,7 +4349,7 @@ async function saveAdminAccountForm(form) {
 async function deleteAdminAccount(user) {
   if (!user?.id) return;
   if (!(await confirmAction(`确定删除账号 ${user.username} 吗？相关训练记录会按数据库外键同步清理。`))) return;
-  await api(`/api/admin/user/${user.id}`, { method: "DELETE" });
+  await fitnessApi.deleteAdminUser(user.id);
   await loadAdminData();
   closeReportModal();
   showUsersModal(user.role === "admin" ? "admin" : "");
@@ -4505,10 +4358,7 @@ async function deleteAdminAccount(user) {
 async function recordAdminAction(action, detail = "") {
   if (!isAdminUser()) return;
   try {
-    await api("/api/admin/logs", {
-      method: "POST",
-      body: JSON.stringify({ admin_user_id: state.user.id, action, detail }),
-    });
+    await fitnessApi.recordAdminLog({ admin_user_id: state.user.id, action, detail });
     await loadAdminData();
   } catch (error) {
     console.warn("admin log skipped", error);
@@ -4581,19 +4431,16 @@ function showAdminUserForm(role = "user") {
   $("adminUserCreateForm")?.addEventListener("submit", async (event) => {
     event.preventDefault();
     const form = new FormData(event.currentTarget);
-    await api("/api/admin/user", {
-      method: "POST",
-      body: JSON.stringify({
-        admin_user_id: state.user.id,
-        role,
-        username: form.get("username"),
-        nickname: form.get("nickname"),
-        password: form.get("password"),
-        age: form.get("age"),
-        fitness_level: form.get("fitness_level"),
-        preference: form.get("preference"),
-        location: form.get("location"),
-      }),
+    await fitnessApi.saveAdminUser({
+      admin_user_id: state.user.id,
+      role,
+      username: form.get("username"),
+      nickname: form.get("nickname"),
+      password: form.get("password"),
+      age: form.get("age"),
+      fitness_level: form.get("fitness_level"),
+      preference: form.get("preference"),
+      location: form.get("location"),
     });
     await loadAdminData();
     closeReportModal();
@@ -4629,18 +4476,15 @@ function showAdminCourseForm(course = null) {
   $("adminCourseForm")?.addEventListener("submit", async (event) => {
     event.preventDefault();
     const form = new FormData(event.currentTarget);
-    await api("/api/admin/exercise", {
-      method: "POST",
-      body: JSON.stringify({
-        admin_user_id: state.user.id,
-        id: course?.id || null,
-        name: form.get("name"),
-        category: form.get("category"),
-        difficulty: form.get("difficulty"),
-        target: form.get("target"),
-        equipment: form.get("equipment"),
-        duration: form.get("duration"),
-      }),
+    await fitnessApi.saveAdminExercise({
+      admin_user_id: state.user.id,
+      id: course?.id || null,
+      name: form.get("name"),
+      category: form.get("category"),
+      difficulty: form.get("difficulty"),
+      target: form.get("target"),
+      equipment: form.get("equipment"),
+      duration: form.get("duration"),
     });
     await loadAdminData();
     closeReportModal();
@@ -4680,21 +4524,18 @@ function showAdminRoleForm() {
   $("adminRoleForm")?.addEventListener("submit", async (event) => {
     event.preventDefault();
     const form = new FormData(event.currentTarget);
-    await api("/api/admin/role", {
-      method: "POST",
-      body: JSON.stringify({
-        admin_user_id: state.user.id,
-        name: form.get("name"),
-        key: form.get("key"),
-        permissions: {
-          users: form.get("users"),
-          training: form.get("training"),
-          courses: form.get("courses"),
-          equipment: form.get("equipment"),
-          reports: form.get("reports"),
-          system: form.get("system"),
-        },
-      }),
+    await fitnessApi.saveAdminRole({
+      admin_user_id: state.user.id,
+      name: form.get("name"),
+      key: form.get("key"),
+      permissions: {
+        users: form.get("users"),
+        training: form.get("training"),
+        courses: form.get("courses"),
+        equipment: form.get("equipment"),
+        reports: form.get("reports"),
+        system: form.get("system"),
+      },
     });
     await loadAdminData();
     closeReportModal();
@@ -4707,10 +4548,7 @@ async function createAnnouncement() {
   if (!title) return;
   const content = prompt("公告内容", "请管理员关注今日运营数据变化。");
   if (!content) return;
-  await api("/api/admin/announcement", {
-    method: "POST",
-    body: JSON.stringify({ admin_user_id: state.user.id, title, content, level: "info" }),
-  });
+  await fitnessApi.createAnnouncement({ admin_user_id: state.user.id, title, content, level: "info" });
   await loadAdminData();
   showAdminModal("公告已发布", "已写入 system_announcements 表", `<p class="modal-summary">${title}</p>`);
 }
@@ -4719,12 +4557,9 @@ async function saveAdminSettings() {
   const settings = Object.fromEntries(
     state.admin.settings.map((item) => [item.dict_key, Boolean(Number(item.enabled))]),
   );
-  await api("/api/admin/settings", {
-    method: "POST",
-    body: JSON.stringify({
-      admin_user_id: state.user.id,
-      settings,
-    }),
+  await fitnessApi.saveAdminSettings({
+    admin_user_id: state.user.id,
+    settings,
   });
   await loadAdminData();
   showAdminModal("系统设置已保存", "已写入 dictionaries 表", adminTable(["设置项", "状态"], state.admin.settings.map((item) => [item.label || item.dict_key, Number(item.enabled) ? "开启" : "关闭"])));
