@@ -1,6 +1,9 @@
 __pycache__/
 data/*.db
 app/ai/data/*.db
+app/ai/data/*.db-journal
+app/ai/data/*.db-wal
+app/ai/data/*.db-shm
 app/ai/data/fitness_knowledge_custom.json
 *.pyc
 .env

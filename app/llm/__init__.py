@@ -4,6 +4,8 @@ from app.llm.client import (
     LLMError,
     LLMInvocationError,
     LLMProviderConfig,
+    ToolCall,
+    ToolSpec,
 )
 
 __all__ = [
@@ -12,4 +14,6 @@ __all__ = [
     "LLMError",
     "LLMInvocationError",
     "LLMProviderConfig",
+    "ToolCall",
+    "ToolSpec",
 ]

@@ -29,17 +29,32 @@ class BaseAgent:
         self.prompt_module = prompt_module or self.prompt_module
         self.output_schema = output_schema or self.output_schema
 
-    def run(self, input_data: dict[str, Any]) -> dict[str, Any]:
-        raw_output = self.llm_client.invoke(self.build_prompt(input_data))
+    def tools(self) -> list[Any]:
+        return []
+
+    def run(
+        self,
+        input_data: dict[str, Any],
+        *,
+        tools: list[Any] | None = None,
+    ) -> dict[str, Any]:
+        client = self._bound_client(tools)
+        raw_output = client.invoke(self.build_prompt(input_data))
         return self._parse(raw_output)
 
-    async def arun(self, input_data: dict[str, Any]) -> dict[str, Any]:
+    async def arun(
+        self,
+        input_data: dict[str, Any],
+        *,
+        tools: list[Any] | None = None,
+    ) -> dict[str, Any]:
         prompt = self.build_prompt(input_data)
-        ainvoke = getattr(self.llm_client, "ainvoke", None)
+        client = self._bound_client(tools)
+        ainvoke = getattr(client, "ainvoke", None)
         if ainvoke is not None:
             raw_output = await ainvoke(prompt)
         else:
-            raw_output = await asyncio.to_thread(self.llm_client.invoke, prompt)
+            raw_output = await asyncio.to_thread(client.invoke, prompt)
         return self._parse(raw_output)
 
     def build_prompt(self, input_data: dict[str, Any]) -> str:
@@ -92,3 +107,12 @@ class BaseAgent:
     @property
     def recoverable_errors(self) -> tuple[type[Exception], ...]:
         return (LLMConfigurationError, LLMInvocationError, LLMOutputError, ValueError, RuntimeError)
+
+    def _bound_client(self, tools: list[Any] | None = None):
+        tool_defs = list(tools if tools is not None else self.tools())
+        if not tool_defs:
+            return self.llm_client
+        binder = getattr(self.llm_client, "bind_tools", None)
+        if callable(binder):
+            return binder(tool_defs)
+        return self.llm_client

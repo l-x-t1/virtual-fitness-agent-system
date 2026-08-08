@@ -11,6 +11,7 @@ import json
 import logging
 from typing import Any
 
+from app.agents.prompts.tool_recommend_prompt import PROMPT_TEMPLATE as TOOL_RECOMMEND_PROMPT
 from app.agents import (
     EvaluateAgent as StructuredEvaluateAgent,
     MotivationAgent as StructuredMotivationAgent,
@@ -79,6 +80,7 @@ class RecommendAgent(StructuredRecommendAgent):
 
     def __init__(self, *args, **kwargs):
         super().__init__(*args, **kwargs)
+        self._tool_context: dict[str, list[dict[str, Any]]] = {}
         try:
             from app.graph.neo4j_fitness_graph import Neo4jFitnessGraph
 
@@ -87,6 +89,125 @@ class RecommendAgent(StructuredRecommendAgent):
         except Exception:
             self.graph = FitnessKnowledgeGraph()
             logger.info("RecommendAgent using lightweight graph (Neo4j unavailable)")
+
+    def tools(self) -> list[Any]:
+        return [
+            {
+                "name": "recommend_exercises",
+                "description": "从知识图谱中获取适合当前用户的动作候选。",
+                "handler": self._tool_recommend_exercises,
+            },
+            {
+                "name": "recommend_venues",
+                "description": "从知识图谱中获取适合当前用户或动作的场馆候选。",
+                "handler": self._tool_recommend_venues,
+            },
+        ]
+
+    def _tool_recommend_exercises(
+        self,
+        profile: dict[str, Any] | None = None,
+        user: dict[str, Any] | None = None,
+        top_k: int = 5,
+    ) -> dict[str, Any]:
+        """Return exercise candidates from the active graph source."""
+        self.graph.refresh()
+        profile_data = dict(profile or user or {})
+        exercises = self.graph.recommend_exercises(profile_data)[: max(1, min(int(top_k or 5), 5))]
+        self._tool_context["recommend_exercises"] = exercises
+        return {"exercises": exercises}
+
+    def _tool_recommend_venues(
+        self,
+        profile: dict[str, Any] | None = None,
+        user: dict[str, Any] | None = None,
+        exercise_name: str | None = None,
+    ) -> dict[str, Any]:
+        """Return venue candidates for the active user and exercise."""
+        self.graph.refresh()
+        profile_data = dict(profile or user or {})
+        venues = self.graph.recommend_venues(profile_data, exercise_name)
+        self._tool_context["recommend_venues"] = venues
+        return {"venues": venues}
+
+    def recommend_with_tools(
+        self,
+        user: dict[str, Any],
+        exercise_name: str | None = None,
+        history: list[dict[str, Any]] | None = None,
+        question: str | None = None,
+    ) -> dict[str, Any]:
+        self._tool_context = {}
+        self.graph.refresh()
+        payload = {
+            "profile": dict(user or {}),
+            "history": list(history or []),
+            "current_exercise": exercise_name,
+            "question": question or "请结合工具结果给出训练动作推荐。",
+        }
+        prompt = TOOL_RECOMMEND_PROMPT.format(
+            input_json=json.dumps(payload, ensure_ascii=False, default=str)
+        )
+        raw = self._bound_client(self.tools()).invoke(prompt)
+        structured = self._parse(raw)
+        exercises = self._tool_context.get("recommend_exercises") or list(self.graph.exercises)
+        venues = self._tool_context.get("recommend_venues") or list(self.graph.venues)
+        recommendations = self._whitelist(structured["recommendations"], exercises)
+        if not recommendations:
+            return self._fallback_from_tools(user, exercises, venues, "model_returned_no_valid_candidates")
+        graph_by_name = {item.get("name"): item for item in exercises}
+        merged_exercises = []
+        for recommendation in recommendations:
+            base = graph_by_name.get(recommendation["name"], {})
+            merged_exercises.append(
+                {
+                    **base,
+                    "name": recommendation["name"],
+                    "match_score": recommendation["score"],
+                    "reason": recommendation["reason"],
+                    "risk_warning": recommendation["risk_warning"],
+                }
+            )
+        return {
+            "exercises": merged_exercises,
+            "venues": venues,
+            "recommendations": recommendations,
+            "mode": "online",
+            "retrieval_backend": "tool-call",
+            "tools_used": {
+                "recommend_exercises": len(self._tool_context.get("recommend_exercises", [])),
+                "recommend_venues": len(self._tool_context.get("recommend_venues", [])),
+            },
+            **{key: value for key, value in structured.items() if key != "recommendations"},
+        }
+
+    def _fallback_from_tools(
+        self,
+        user: dict[str, Any],
+        exercises: list[dict[str, Any]],
+        venues: list[dict[str, Any]],
+        reason: str,
+    ) -> dict[str, Any]:
+        fallback = self._fallback_result(user, exercises, reason)
+        graph_by_name = {item.get("name"): item for item in exercises}
+        merged_exercises = []
+        for recommendation in fallback["recommendations"]:
+            base = graph_by_name.get(recommendation["name"], {})
+            merged_exercises.append(
+                {
+                    **base,
+                    "name": recommendation["name"],
+                    "match_score": recommendation["score"],
+                    "reason": recommendation["reason"],
+                    "risk_warning": recommendation["risk_warning"],
+                }
+            )
+        return {
+            "exercises": merged_exercises,
+            "venues": venues,
+            **fallback,
+            "retrieval_backend": "tool-call",
+        }
 
     def recommend_structured(
         self,

@@ -72,10 +72,39 @@ class GraphService:
                   top_k: int = 5) -> GraphRecommendResponse:
         """图谱推荐，Neo4j 不可用时回退轻量图谱"""
 
+        if use_llm:
+            try:
+                return self._recommend_with_tools(user, exercise_name, top_k)
+            except Exception:
+                logger.exception("Tool-based recommendation failed, falling back to graph path")
+
         if is_available():
             return self._recommend_neo4j(user, exercise_name, lat, lon, max_distance_m, use_llm, top_k)
         else:
             return self._recommend_fallback(user, exercise_name, top_k)
+
+    def _recommend_with_tools(self, user: dict, exercise_name: str | None, top_k: int) -> GraphRecommendResponse:
+        from agents import RecommendAgent
+
+        agent = RecommendAgent()
+        result = agent.recommend_with_tools(user, exercise_name=exercise_name)
+        exercises = self._coerce_exercises(result.get("exercises") or result.get("recommendations") or [], top_k)
+        venues = self._coerce_venues(result.get("venues") or [], top_k)
+        return GraphRecommendResponse(exercises=exercises, venues=venues)
+
+    def _coerce_exercises(self, items: list[dict], top_k: int) -> list[ExerciseRecommendItem]:
+        return [
+            ExerciseRecommendItem.model_validate(item).model_dump()
+            for item in items[:top_k]
+            if isinstance(item, dict) and item.get("name")
+        ]
+
+    def _coerce_venues(self, items: list[dict], top_k: int) -> list[VenueRecommendItem]:
+        return [
+            VenueRecommendItem.model_validate(item).model_dump()
+            for item in items[:top_k]
+            if isinstance(item, dict) and item.get("name")
+        ]
 
     def _recommend_neo4j(self, user, exercise_name, lat, lon, max_distance_m, use_llm, top_k):
         result = self.rag.recommend(

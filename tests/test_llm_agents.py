@@ -4,6 +4,7 @@ import asyncio
 import json
 from types import SimpleNamespace
 
+import agents
 import pytest
 
 from app.agents import (
@@ -43,6 +44,27 @@ class FakeLLM:
         if isinstance(self.response, str):
             return self.response
         return json.dumps(self.response, ensure_ascii=False)
+
+
+class ToolLoopModel:
+    def __init__(self, responses):
+        self.responses = list(responses)
+        self.bound_tools = []
+        self.tool_choice = None
+        self.invocations = []
+
+    def bind_tools(self, tools, tool_choice=None):
+        self.bound_tools = list(tools)
+        self.tool_choice = tool_choice
+        return self
+
+    def invoke(self, prompt):
+        self.invocations.append(prompt)
+        return self.responses.pop(0)
+
+    async def ainvoke(self, prompt):
+        self.invocations.append(prompt)
+        return self.responses.pop(0)
 
 
 def user() -> dict:
@@ -293,6 +315,161 @@ def test_report_agent_enforces_computed_numbers_and_real_action_names():
     assert "虚构动作" not in result["strengths"]
 
 
+def test_llmclient_tool_loop_supports_multiple_tool_calls():
+    tool_calls = []
+
+    def recommend_exercises(profile, top_k=5):
+        tool_calls.append(("recommend_exercises", profile["fitness_level"], top_k))
+        return {
+            "exercises": [
+                {"name": "平板支撑", "score": 92, "reason": "tool", "risk_warning": ""},
+                {"name": "深蹲", "score": 88, "reason": "tool", "risk_warning": ""},
+            ]
+        }
+
+    def recommend_venues(profile, exercise_name=None):
+        tool_calls.append(("recommend_venues", exercise_name))
+        return {"venues": [{"name": "校内健身房", "match_score": 90}]}
+
+    model = ToolLoopModel(
+        [
+            SimpleNamespace(
+                content=json.dumps(
+                    {
+                        "tool_call": "recommend_exercises",
+                        "arguments": {"profile": user(), "top_k": 2},
+                    },
+                    ensure_ascii=False,
+                )
+            ),
+            SimpleNamespace(
+                content=json.dumps(
+                    {
+                        "tool_call": "recommend_venues",
+                        "arguments": {"profile": user(), "exercise_name": "平板支撑"},
+                    },
+                    ensure_ascii=False,
+                )
+            ),
+            SimpleNamespace(
+                content=json.dumps(
+                    {
+                        "recommendations": [
+                            {
+                                "name": "平板支撑",
+                                "score": 92,
+                                "reason": "优先调用动作工具后生成",
+                                "risk_warning": "",
+                            },
+                            {
+                                "name": "深蹲",
+                                "score": 88,
+                                "reason": "结合动作工具结果",
+                                "risk_warning": "",
+                            },
+                        ]
+                    },
+                    ensure_ascii=False,
+                )
+            ),
+        ]
+    )
+
+    client = LLMClient(
+        environ={"LLM_PROVIDER": "deepseek", "DEEPSEEK_API_KEY": "test-key"},
+        chat_model=model,
+        tools=[recommend_exercises, recommend_venues],
+    )
+    result = json.loads(client.invoke("帮我做个腿部训练推荐"))
+    assert [item["name"] for item in result["recommendations"]] == ["平板支撑", "深蹲"]
+    assert tool_calls == [
+        ("recommend_exercises", "beginner", 2),
+        ("recommend_venues", "平板支撑"),
+    ]
+    assert len(model.bound_tools) == 2
+
+
+def test_top_level_recommend_agent_can_use_tools(monkeypatch):
+    class FakeGraph:
+        def __init__(self):
+            self.exercises = [
+                {
+                    "name": "平板支撑",
+                    "category": "核心训练",
+                    "difficulty": 1,
+                    "target": "核心稳定",
+                    "equipment": "瑜伽垫",
+                    "standard_json": "{}",
+                }
+            ]
+            self.venues = [{"name": "校内健身房", "match_score": 90}]
+
+        def refresh(self):
+            return None
+
+        def recommend_exercises(self, profile):
+            return list(self.exercises)
+
+        def recommend_venues(self, profile, exercise_name=None):
+            return list(self.venues)
+
+    model = ToolLoopModel(
+        [
+            SimpleNamespace(
+                content=json.dumps(
+                    {
+                        "tool_call": "recommend_exercises",
+                        "arguments": {"profile": user(), "top_k": 1},
+                    },
+                    ensure_ascii=False,
+                )
+            ),
+            SimpleNamespace(
+                content=json.dumps(
+                    {
+                        "tool_call": "recommend_venues",
+                        "arguments": {"profile": user(), "exercise_name": "平板支撑"},
+                    },
+                    ensure_ascii=False,
+                )
+            ),
+            SimpleNamespace(
+                content=json.dumps(
+                    {
+                        "recommendations": [
+                            {
+                                "name": "平板支撑",
+                                "score": 94,
+                                "reason": "工具返回了匹配的核心动作",
+                                "risk_warning": "",
+                            }
+                        ]
+                    },
+                    ensure_ascii=False,
+                )
+            ),
+        ]
+    )
+
+    agent = agents.RecommendAgent(
+        llm_client=LLMClient(
+            environ={"LLM_PROVIDER": "deepseek", "DEEPSEEK_API_KEY": "test-key"}
+        ),
+        vector_store=ExerciseVectorStore(prefer_faiss=False),
+    )
+    monkeypatch.setattr(agent, "graph", FakeGraph())
+    agent.llm_client = LLMClient(
+        environ={"LLM_PROVIDER": "deepseek", "DEEPSEEK_API_KEY": "test-key"},
+        chat_model=model,
+        tools=agent.tools(),
+    )
+    result = agent.recommend_with_tools(user(), exercise_name="平板支撑")
+    assert result["recommendations"][0]["name"] == "平板支撑"
+    assert result["tools_used"] == {"recommend_exercises": 1, "recommend_venues": 1}
+    assert result["venues"][0]["name"] == "校内健身房"
+    assert len(model.bound_tools) == 2
+
+
 def test_mock_llm_async_calls_for_all_agents():
     profile_llm = FakeLLM(
         {
@@ -406,3 +583,40 @@ def test_api_key_is_not_in_exception_or_logs(caplog):
     assert secret not in str(exc_info.value)
     assert secret not in repr(client.config)
     assert secret not in caplog.text
+
+
+def test_graph_service_use_llm_routes_through_tool_agent(monkeypatch):
+    calls = []
+
+    class FakeToolAgent:
+        def recommend_with_tools(self, user, exercise_name=None, history=None, question=None):
+            calls.append((user["id"], exercise_name))
+            return {
+                "exercises": [
+                    {
+                        "name": "骞虫澘鏀拺",
+                        "category": "鏍稿績璁粌",
+                        "difficulty": 1,
+                        "target": "鏍稿績绋冲畾",
+                        "equipment": "鏃犲櫒鏉?",
+                        "score": 96,
+                        "reason": "tool",
+                        "risk_warning": "",
+                    }
+                ],
+                "venues": [
+                    {
+                        "name": "鏍″唴鍋ヨ韩鎴?",
+                        "location": "鏍″唴",
+                        "match_score": 88,
+                    }
+                ],
+            }
+
+    monkeypatch.setattr("agents.RecommendAgent", FakeToolAgent)
+    from app.services.graph_service import GraphService
+
+    result = GraphService().recommend({"id": 7}, exercise_name="骞虫澘鏀拺", use_llm=True)
+    assert calls == [(7, "骞虫澘鏀拺")]
+    assert result.exercises[0].name == "骞虫澘鏀拺"
+    assert result.venues[0].name == "鏍″唴鍋ヨ韩鎴?"
