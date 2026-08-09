@@ -88,6 +88,34 @@ def test_demo_chat_keeps_context_and_returns_sources():
     assert detail["title"] == "深蹲要注意什么？"
 
 
+def test_long_term_memory_survives_across_sessions_and_users():
+    clean_user = {
+        "id": 99,
+        "nickname": "记忆测试用户",
+        "fitness_level": "beginner",
+        "injuries": "",
+        "preference": "综合训练",
+    }
+    coach = AICoach(llm=OfflineLLM(), memory=ConversationStore(db_path=":memory:"))
+    first = coach.create_session(clean_user["id"], "first")
+    coach.chat(
+        clean_user,
+        [],
+        {"session_id": first["id"], "message": "我膝盖不好", "provider": "deepseek", "model": None},
+    )
+
+    second = coach.create_session(clean_user["id"], "next-month")
+    result = coach.chat(
+        clean_user,
+        [],
+        {"session_id": second["id"], "message": "帮我制定训练计划", "provider": "deepseek", "model": None},
+    )
+
+    assert result["memory"]["long_term_hits"] >= 1
+    assert "膝盖" in result["answer"]
+    assert coach.memory.search_long_term(100, "帮我制定训练计划") == []
+
+
 def test_demo_plan_is_structured_and_risk_aware():
     coach = AICoach(llm=OfflineLLM(), memory=ConversationStore(db_path=":memory:"))
     result = coach.plan(user(), [], {"duration_minutes": 25, "goal": "提升体能"})
