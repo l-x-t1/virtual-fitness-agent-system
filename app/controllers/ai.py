@@ -2,9 +2,10 @@ from pathlib import Path
 
 from fastapi import APIRouter, Depends, HTTPException, Query, Request
 from fastapi.concurrency import run_in_threadpool
-from fastapi.responses import FileResponse
+from fastapi.responses import FileResponse, StreamingResponse
 
 from app.ai import AICoach
+from app.ai.sse import AIStreamOrchestrator
 from app.controllers.auth import envelope
 from app.dependencies.auth import get_current_user
 from app.models.ai import (
@@ -19,6 +20,7 @@ from app.repositories import FitnessRepository, session_scope
 
 router = APIRouter(tags=["AI 教练"])
 coach = AICoach()
+stream_orchestrator = AIStreamOrchestrator(coach)
 PAGE = Path(__file__).resolve().parents[2] / "templates" / "ai-coach.html"
 
 
@@ -70,6 +72,26 @@ async def ai_chat(body: AIChatRequest, request: Request, user=Depends(get_curren
     except ValueError as exc:
         raise HTTPException(status_code=404, detail=str(exc)) from exc
     return envelope(request, data)
+
+
+@router.post("/api/ai/chat/stream")
+async def ai_chat_stream(body: AIChatRequest, request: Request, user=Depends(get_current_user)):
+    history = await run_in_threadpool(recent_history, user["id"])
+    events = stream_orchestrator.stream(
+        user,
+        history,
+        body.model_dump(),
+        is_disconnected=request.is_disconnected,
+    )
+    return StreamingResponse(
+        events,
+        media_type="text/event-stream",
+        headers={
+            "Cache-Control": "no-cache",
+            "Connection": "keep-alive",
+            "X-Accel-Buffering": "no",
+        },
+    )
 
 
 @router.get("/api/ai/profile")
