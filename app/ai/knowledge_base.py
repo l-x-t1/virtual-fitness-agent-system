@@ -17,6 +17,7 @@ class FitnessKnowledgeBase:
         self.custom_source = custom_source or self.source.with_name("fitness_knowledge_custom.json")
         self._lock = RLock()
         self.documents = self._load_documents()
+        self.embeddings = HashingEmbeddings()
         self._store = None
 
     def _load_documents(self) -> list[dict]:
@@ -40,7 +41,7 @@ class FitnessKnowledgeBase:
                 Document(page_content=f"{item['title']}：{item['content']}", metadata={"id": item["id"]})
                 for item in self.documents
             ]
-            self._store = FAISS.from_documents(docs, HashingEmbeddings())
+            self._store = FAISS.from_documents(docs, self.embeddings)
         except (ImportError, RuntimeError, ValueError):
             self._store = False
         return self._store
@@ -56,6 +57,40 @@ class FitnessKnowledgeBase:
                 if doc.metadata.get("id") in by_id
             ]
         return self._keyword_search(query, top_k)
+
+    def vector_search(self, query: str, top_k: int = 3) -> list[dict]:
+        """Use the existing FAISS index, with deterministic local cosine fallback."""
+        store = self._vector_store()
+        if store:
+            hits = store.similarity_search_with_score(query, k=min(top_k, len(self.documents)))
+            by_id = {item["id"]: item for item in self.documents}
+            return [
+                {
+                    **by_id[doc.metadata["id"]],
+                    "distance": round(float(distance), 6),
+                    "similarity": round(1.0 / (1.0 + max(0.0, float(distance))), 6),
+                    "vector_backend": "faiss",
+                }
+                for doc, distance in hits
+                if doc.metadata.get("id") in by_id
+            ]
+        query_vector = self.embeddings.embed_query(query)
+        ranked = []
+        for item in self.documents:
+            text = f"{item.get('title', '')}：{item.get('content', '')}"
+            vector = self.embeddings.embed_query(text)
+            similarity = sum(left * right for left, right in zip(query_vector, vector))
+            ranked.append((max(0.0, similarity), item))
+        ranked.sort(key=lambda pair: (-pair[0], str(pair[1].get("id", ""))))
+        return [
+            {
+                **item,
+                "distance": None,
+                "similarity": round(score, 6),
+                "vector_backend": "local-cosine",
+            }
+            for score, item in ranked[: min(max(1, top_k), len(ranked))]
+        ]
 
     def import_documents(self, documents: list[dict]) -> dict:
         with self._lock:

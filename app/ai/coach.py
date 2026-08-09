@@ -8,15 +8,23 @@ from app.ai.knowledge_base import FitnessKnowledgeBase
 from app.ai.llm import AIProviderError, UnifiedLLM
 from app.ai.memory import ConversationStore
 from app.ai.prompts import CORRECTION, PLAN, PROFILE, QA, SYSTEM_COACH
+from app.ai.rag import HybridRAGPipeline
 from app.ai.schemas import TrainingPlan, UserProfile
 from app.agents.output_parser import OutputParser
+from app.observability import get_tracer
 
 
 class AICoach:
-    def __init__(self, llm=None, memory=None, knowledge=None):
+    def __init__(self, llm=None, memory=None, knowledge=None, rag=None, tracer=None):
         self.llm = llm or UnifiedLLM()
         self.memory = memory or ConversationStore()
         self.knowledge = knowledge or FitnessKnowledgeBase()
+        self.tracer = tracer or get_tracer()
+        self.rag = rag or HybridRAGPipeline(
+            knowledge_base=self.knowledge,
+            llm=self.llm,
+            tracer=self.tracer,
+        )
         self.parser = OutputParser()
 
     def status(self) -> dict:
@@ -53,31 +61,83 @@ class AICoach:
         return self.memory.delete(session_id, user_id)
 
     def chat(self, user: dict, history: list[dict], data: dict) -> dict:
+        prepared = self.prepare_chat(user, history, data)
+        return self.complete_chat(prepared, data)
+
+    def prepare_chat(self, user: dict, history: list[dict], data: dict, trace=None) -> dict:
         session = self.memory.get(data["session_id"], user["id"])
         if not session:
             raise ValueError("AI 会话不存在或已过期")
         question = data["message"].strip()
-        context = self.knowledge.search(question, 3)
-        memory_context = self.memory.context(user["id"], session=session, query=question)
+        trace = trace or self.tracer.start_trace(
+            "ai_chat",
+            session_id=session.id,
+            user_id=user["id"],
+            metadata={
+                "agent": "AICoach",
+                "prompt_template": "hybrid_rag_grounded_answer",
+                "provider": data.get("provider"),
+                "model": data.get("model"),
+                "user_input": question,
+            },
+        )
+        with trace.span("memory.read", component="memory"):
+            memory_context = self.memory.context(user["id"], session=session, query=question)
+        trace.event(
+            "memory.context",
+            {
+                "short_term_messages": len(memory_context.short_term_messages),
+                "long_term_hits": len(memory_context.long_term_memories),
+                "summary_hits": len(memory_context.summary_memories),
+            },
+        )
         profile = self.profile(user, history, use_llm=False)
         profile = self._merge_memory_into_profile(profile, memory_context.long_term_memories)
-        messages = [
-            {"role": "system", "content": SYSTEM_COACH + "\n" + QA},
-            {
-                "role": "system",
-                "content": "用户画像：" + json.dumps(profile, ensure_ascii=False)
-                + "\n检索资料：" + json.dumps(context, ensure_ascii=False),
-            },
-            {"role": "system", "content": memory_context.as_system_prompt()},
-            *memory_context.short_term_messages,
-            {"role": "user", "content": question},
-        ]
-        mode = "online"
-        try:
-            answer = self.llm.chat(messages, data.get("provider"), data.get("model"))
-        except AIProviderError:
-            mode = "demo"
-            answer = self._demo_answer(question, context, profile)
+        retrieval = self.rag.retrieve(
+            question,
+            recent_messages=memory_context.short_term_messages,
+            memory=memory_context,
+            user_id=user["id"],
+            provider=data.get("provider"),
+            model=data.get("model"),
+            top_k=5,
+            trace=trace,
+        )
+        return {
+            "session": session,
+            "question": question,
+            "memory_context": memory_context,
+            "profile": profile,
+            "retrieval": retrieval,
+            "trace": trace,
+            "user": user,
+            "history": history,
+        }
+
+    def complete_chat(
+        self,
+        prepared: dict,
+        data: dict,
+        *,
+        answer_override: str | None = None,
+        mode_override: str | None = None,
+    ) -> dict:
+        session = prepared["session"]
+        question = prepared["question"]
+        memory_context = prepared["memory_context"]
+        trace = prepared["trace"]
+        rag_result = self.rag.complete(
+            question,
+            prepared["retrieval"],
+            provider=data.get("provider"),
+            model=data.get("model"),
+            trace=trace,
+            answer_override=answer_override,
+            mode_override=mode_override,
+            finish_trace=False,
+        )
+        answer = rag_result.answer
+        mode = "online" if rag_result.mode == "online" else "demo"
         self.memory.add(session, "user", question)
         self.memory.add(session, "assistant", answer)
         if len(session.messages) == 2 and (
@@ -86,22 +146,35 @@ class AICoach:
             session.title = question[:16] + ("…" if len(question) > 16 else "")
         session.state["last_topic"] = question[:80]
         session.state["turn_count"] = int(session.state.get("turn_count", 0)) + 1
-        session.state["last_provider"] = data.get("provider") or self.llm.resolve().name
+        try:
+            resolved_provider = data.get("provider") or self.llm.resolve().name
+        except Exception:
+            resolved_provider = data.get("provider") or "unknown"
+        session.state["last_provider"] = resolved_provider
         self.memory.save(session)
-        memory_update = self.memory.remember_turn(
-            user_id=user["id"],
-            session=session,
-            user_message=question,
-            assistant_message=answer,
-            llm=self.llm,
-            provider=data.get("provider"),
-            model=data.get("model"),
-        )
-        return {
+        with trace.span("memory.write", component="memory"):
+            memory_update = self.memory.remember_turn(
+                user_id=prepared["user"]["id"],
+                session=session,
+                user_message=question,
+                assistant_message=answer,
+                llm=self.llm,
+                provider=data.get("provider"),
+                model=data.get("model"),
+            )
+        result = {
             "session_id": session.id,
             "answer": answer,
             "mode": mode,
-            "sources": [{"id": item["id"], "title": item["title"]} for item in context],
+            "sources": rag_result.sources,
+            "citations": rag_result.citations,
+            "trace_id": rag_result.trace_id,
+            "retrieval": {
+                "queries": rag_result.rewritten_queries,
+                "counts": rag_result.retrieval_counts,
+                "rewrite_mode": rag_result.rewrite_mode,
+                "rerank_mode": rag_result.rerank_mode,
+            },
             "state": dict(session.state),
             "memory": {
                 "short_term_messages": len(memory_context.short_term_messages),
@@ -111,6 +184,8 @@ class AICoach:
                 "summary_updated": memory_update["summary_updated"],
             },
         }
+        trace.finish({"mode": mode, "source_count": len(rag_result.sources)})
+        return result
 
     def profile(self, user: dict, history: list[dict], use_llm: bool = True, provider=None, model=None) -> dict:
         payload = {"body_data": user, "training_history": history}
