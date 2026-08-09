@@ -58,7 +58,9 @@ class AICoach:
             raise ValueError("AI 会话不存在或已过期")
         question = data["message"].strip()
         context = self.knowledge.search(question, 3)
+        memory_context = self.memory.context(user["id"], session=session, query=question)
         profile = self.profile(user, history, use_llm=False)
+        profile = self._merge_memory_into_profile(profile, memory_context.long_term_memories)
         messages = [
             {"role": "system", "content": SYSTEM_COACH + "\n" + QA},
             {
@@ -66,7 +68,8 @@ class AICoach:
                 "content": "用户画像：" + json.dumps(profile, ensure_ascii=False)
                 + "\n检索资料：" + json.dumps(context, ensure_ascii=False),
             },
-            *session.messages[-10:],
+            {"role": "system", "content": memory_context.as_system_prompt()},
+            *memory_context.short_term_messages,
             {"role": "user", "content": question},
         ]
         mode = "online"
@@ -85,12 +88,28 @@ class AICoach:
         session.state["turn_count"] = int(session.state.get("turn_count", 0)) + 1
         session.state["last_provider"] = data.get("provider") or self.llm.resolve().name
         self.memory.save(session)
+        memory_update = self.memory.remember_turn(
+            user_id=user["id"],
+            session=session,
+            user_message=question,
+            assistant_message=answer,
+            llm=self.llm,
+            provider=data.get("provider"),
+            model=data.get("model"),
+        )
         return {
             "session_id": session.id,
             "answer": answer,
             "mode": mode,
             "sources": [{"id": item["id"], "title": item["title"]} for item in context],
             "state": dict(session.state),
+            "memory": {
+                "short_term_messages": len(memory_context.short_term_messages),
+                "long_term_hits": len(memory_context.long_term_memories),
+                "summary_hits": len(memory_context.summary_memories),
+                "long_term_saved": memory_update["long_term_saved"],
+                "summary_updated": memory_update["summary_updated"],
+            },
         }
 
     def profile(self, user: dict, history: list[dict], use_llm: bool = True, provider=None, model=None) -> dict:
@@ -140,7 +159,14 @@ class AICoach:
 
     def plan(self, user: dict, history: list[dict], data: dict) -> dict:
         profile = self.profile(user, history, use_llm=False)
-        payload = {"profile": profile, "history": history[:10], "request": data}
+        memory_context = self.memory.context(user["id"], query=str(data.get("goal") or "训练计划"))
+        profile = self._merge_memory_into_profile(profile, memory_context.long_term_memories)
+        payload = {
+            "profile": profile,
+            "history": history[:10],
+            "request": data,
+            "memory_context": memory_context.as_system_prompt(),
+        }
         try:
             raw = self.llm.chat(
                 [{"role": "system", "content": SYSTEM_COACH}, {"role": "user", "content": PLAN.replace("{input_json}", json.dumps(payload, ensure_ascii=False, default=str))}],
@@ -244,6 +270,43 @@ class AICoach:
             cooldown=["慢走与调整呼吸", "轻柔拉伸主要训练肌群"],
             safety_notes=["全程保持无痛且可控", "不适时立即降低强度或停止"],
         ).model_dump()
+
+    def _merge_memory_into_profile(self, profile: dict, memories: list[dict]) -> dict:
+        enriched = dict(profile or {})
+        goals = list(enriched.get("goals") or [])
+        preferences = list(enriched.get("preferences") or [])
+        risk_flags = list(enriched.get("risk_flags") or [])
+        habits = list(enriched.get("habits") or [])
+        memory_notes = []
+
+        for item in memories:
+            category = str(item.get("category") or "")
+            content = str(item.get("content") or "").strip()
+            if not content:
+                continue
+            memory_notes.append(content)
+            if category == "body_issue" and content not in risk_flags:
+                risk_flags.append(content)
+            elif category == "goal" and content not in goals:
+                goals.append(content)
+            elif category == "preference" and content not in preferences:
+                preferences.append(content)
+            elif category == "habit" and content not in habits:
+                habits.append(content)
+            elif category == "age":
+                match = re.search(r"\d{1,3}", content)
+                if match:
+                    enriched["age"] = int(match.group(0))
+
+        enriched["goals"] = goals
+        enriched["preferences"] = preferences
+        enriched["risk_flags"] = risk_flags
+        enriched["habits"] = habits
+        if memory_notes:
+            summary = str(enriched.get("summary") or "").strip()
+            note = "记忆补充：" + "；".join(memory_notes[:6])
+            enriched["summary"] = f"{summary} {note}".strip()
+        return enriched
 
     def _session(self, item, include_messages: bool = False) -> dict:
         result = {
