@@ -6,7 +6,6 @@ import time
 from typing import Any
 
 from app.ai.knowledge_base import FitnessKnowledgeBase
-from app.ai.llm import AIProviderError, UnifiedLLM
 from app.ai.rag.bm25_retriever import BM25Retriever
 from app.ai.rag.fusion import ResultFusion
 from app.ai.rag.graph_retriever import GraphRetriever
@@ -14,6 +13,7 @@ from app.ai.rag.query_rewriter import QueryRewriter
 from app.ai.rag.reranker import EvidenceReranker
 from app.ai.rag.schemas import EvidenceDocument, RAGResult
 from app.ai.rag.vector_retriever import VectorRetriever
+from app.llm import LLMClient, LLMError
 from app.observability import TraceContext, get_tracer
 
 
@@ -28,7 +28,7 @@ class HybridRAGPipeline:
         tracer: Any | None = None,
     ):
         self.knowledge_base = knowledge_base or FitnessKnowledgeBase()
-        self.llm = llm or UnifiedLLM()
+        self.llm = llm or LLMClient()
         self.query_rewriter = QueryRewriter(self.llm)
         self.bm25 = BM25Retriever(self.knowledge_base.documents)
         self.vector = VectorRetriever(self.knowledge_base)
@@ -164,7 +164,7 @@ class HybridRAGPipeline:
                 )
                 mode = "online"
                 fallback_reason = None
-            except (AIProviderError, ValueError, TypeError, KeyError):
+            except (LLMError, ValueError, TypeError, KeyError):
                 answer = self._fallback_answer(question, evidence, retrieval["memory_text"])
                 mode = "fallback"
                 fallback_reason = "llm_unavailable_or_invalid"

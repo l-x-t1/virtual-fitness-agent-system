@@ -107,12 +107,12 @@ python test_agents.py
 人员 C 使用独立配置，不依赖知识图谱服务：
 
 ```text
-AI_LLM_PROVIDER=deepseek
-AI_MODEL_NAME=deepseek-v4-flash
-AI_DEEPSEEK_API_KEY=
+LLM_PROVIDER=deepseek
+MODEL_NAME=deepseek-chat
+DEEPSEEK_API_KEY=
 
 # 或在页面选择阿里云百炼
-AI_DASHSCOPE_API_KEY=
+DASHSCOPE_API_KEY=
 ```
 
 主要接口：`GET /api/ai/status`、`POST/GET /api/ai/sessions`、`POST /api/ai/chat`、

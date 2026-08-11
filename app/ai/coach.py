@@ -5,18 +5,18 @@ import re
 from typing import Any
 
 from app.ai.knowledge_base import FitnessKnowledgeBase
-from app.ai.llm import AIProviderError, UnifiedLLM
 from app.ai.memory import ConversationStore
 from app.ai.prompts import CORRECTION, PLAN, PROFILE, QA, SYSTEM_COACH
 from app.ai.rag import HybridRAGPipeline
 from app.ai.schemas import TrainingPlan, UserProfile
 from app.agents.output_parser import OutputParser
+from app.llm import LLMClient, LLMError
 from app.observability import get_tracer
 
 
 class AICoach:
     def __init__(self, llm=None, memory=None, knowledge=None, rag=None, tracer=None):
-        self.llm = llm or UnifiedLLM()
+        self.llm = llm or LLMClient()
         self.memory = memory or ConversationStore()
         self.knowledge = knowledge or FitnessKnowledgeBase()
         self.tracer = tracer or get_tracer()
@@ -42,7 +42,7 @@ class AICoach:
     def test_provider(self, provider: str, model: str | None = None) -> dict:
         try:
             return self.llm.test_connection(provider, model)
-        except AIProviderError as exc:
+        except LLMError as exc:
             config = self.llm.resolve(provider, model)
             return {"ok": False, "provider": config.name, "model": config.model, "error": str(exc)}
 
@@ -197,7 +197,7 @@ class AICoach:
                     model,
                 )
                 return UserProfile.model_validate(self.parser.loads(raw)).model_dump()
-            except (AIProviderError, ValueError):
+            except (LLMError, ValueError):
                 pass
         metrics = self._profile_metrics(history)
         level = user.get("fitness_level") or (
@@ -250,7 +250,7 @@ class AICoach:
             )
             plan = TrainingPlan.model_validate(self.parser.loads(raw)).model_dump()
             return {"plan": plan, "mode": "online", "profile": profile}
-        except (AIProviderError, ValueError):
+        except (LLMError, ValueError):
             return {"plan": self._demo_plan(profile, data), "mode": "demo", "profile": profile}
 
     def correct(self, user: dict, data: dict) -> dict:
@@ -262,7 +262,7 @@ class AICoach:
                 data.get("model"),
             )
             mode = "online"
-        except AIProviderError:
+        except LLMError:
             score = data.get("score", 0)
             answer = "动作整体稳定，继续保持核心收紧和匀速呼吸。" if score >= 80 else "请降低速度，保持关节方向稳定，在无痛范围内完成动作。"
             mode = "demo"

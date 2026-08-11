@@ -4,7 +4,6 @@ import json
 from types import SimpleNamespace
 
 from app.ai.knowledge_base import FitnessKnowledgeBase
-from app.ai.llm import AIProviderError, UnifiedLLM
 from app.ai.memory import MemoryContext
 from app.ai.rag.bm25_retriever import BM25Retriever
 from app.ai.rag.fusion import ResultFusion
@@ -14,14 +13,15 @@ from app.ai.rag.query_rewriter import QueryRewriter
 from app.ai.rag.reranker import EvidenceReranker
 from app.ai.rag.schemas import EvidenceDocument
 from app.ai.rag.vector_retriever import VectorRetriever
+from app.llm import LLMClient, LLMError
 
 
-class OfflineLLM(UnifiedLLM):
+class OfflineLLM(LLMClient):
     def chat(self, *args, **kwargs):
-        raise AIProviderError("offline")
+        raise LLMError("offline")
 
 
-class RoutingLLM(UnifiedLLM):
+class RoutingLLM(LLMClient):
     def __init__(self):
         self.prompts = []
 

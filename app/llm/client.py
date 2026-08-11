@@ -30,6 +30,10 @@ class LLMProviderConfig:
     base_url: str
 
     @property
+    def name(self) -> str:
+        return self.provider
+
+    @property
     def configured(self) -> bool:
         return bool(self.api_key)
 
@@ -92,6 +96,7 @@ class LLMClient:
         tool_choice: str | None = None,
     ):
         env = os.environ if environ is None else environ
+        self._environ = env
         self.config = self._resolve_config(env, provider, model, api_key, base_url)
         self.temperature = self._float_value(
             temperature if temperature is not None else env.get("LLM_TEMPERATURE", "0.2"),
@@ -133,15 +138,59 @@ class LLMClient:
         clone._tool_choice = tool_choice
         return clone
 
+    def resolve(self, provider: str | None = None, model: str | None = None) -> LLMProviderConfig:
+        if provider is None and model is None:
+            return self.config
+        return self._resolve_config(self._environ, provider, model, None, None)
+
+    def available(self) -> list[dict[str, Any]]:
+        result: list[dict[str, Any]] = []
+        for provider in self.DEFAULTS:
+            config = self.resolve(provider)
+            result.append(
+                {
+                    "provider": config.provider,
+                    "default_model": config.model,
+                    "configured": config.configured,
+                }
+            )
+        return result
+
+    def test_connection(self, provider: str, model: str | None = None) -> dict[str, Any]:
+        import time
+
+        config = self.resolve(provider, model)
+        started = time.perf_counter()
+        answer = self.chat(
+            [
+                {"role": "system", "content": "你是接口连通性测试助手。"},
+                {"role": "user", "content": "只回复：连接成功"},
+            ],
+            provider=config.provider,
+            model=config.model,
+            temperature=0,
+        )
+        return {
+            "ok": True,
+            "provider": config.provider,
+            "model": config.model,
+            "latency_ms": round((time.perf_counter() - started) * 1000),
+            "response": answer[:100],
+        }
+
     def chat(
         self,
         messages: list[dict[str, Any] | BaseMessage | tuple[str, str]],
+        provider: str | None = None,
+        model: str | None = None,
+        temperature: float | None = None,
         *,
         tools: list[Any] | None = None,
     ) -> str:
+        client = self._request_client(provider, model, temperature)
         converted = [self._to_message(message) for message in messages]
         try:
-            response = self._invoke_messages(converted, tools=tools)
+            response = client._invoke_messages(converted, tools=tools)
         except LLMConfigurationError:
             raise
         except LLMInvocationError:
@@ -155,12 +204,16 @@ class LLMClient:
     async def achat(
         self,
         messages: list[dict[str, Any] | BaseMessage | tuple[str, str]],
+        provider: str | None = None,
+        model: str | None = None,
+        temperature: float | None = None,
         *,
         tools: list[Any] | None = None,
     ) -> str:
+        client = self._request_client(provider, model, temperature)
         converted = [self._to_message(message) for message in messages]
         try:
-            response = await self._ainvoke_messages(converted, tools=tools)
+            response = await client._ainvoke_messages(converted, tools=tools)
         except LLMConfigurationError:
             raise
         except LLMInvocationError:
@@ -177,6 +230,52 @@ class LLMClient:
     async def ainvoke(self, prompt: str, *, tools: list[Any] | None = None) -> str:
         return await self.achat([HumanMessage(content=prompt)], tools=tools)
 
+    def stream_chat(
+        self,
+        messages: list[dict[str, Any] | BaseMessage | tuple[str, str]],
+        provider: str | None = None,
+        model: str | None = None,
+        temperature: float | None = None,
+    ):
+        client = self._request_client(provider, model, temperature)
+        converted = [client._to_message(message) for message in messages]
+        try:
+            for chunk in client._chat_model().stream(converted):
+                text = client._content_text(chunk)
+                if text:
+                    yield text
+        except LLMConfigurationError:
+            raise
+        except LLMInvocationError:
+            raise
+        except Exception:
+            raise LLMInvocationError(
+                f"LLM stream request failed for provider '{client.config.provider}'."
+            ) from None
+
+    async def astream_chat(
+        self,
+        messages: list[dict[str, Any] | BaseMessage | tuple[str, str]],
+        provider: str | None = None,
+        model: str | None = None,
+        temperature: float | None = None,
+    ):
+        client = self._request_client(provider, model, temperature)
+        converted = [client._to_message(message) for message in messages]
+        try:
+            async for chunk in client._chat_model().astream(converted):
+                text = client._content_text(chunk)
+                if text:
+                    yield text
+        except LLMConfigurationError:
+            raise
+        except LLMInvocationError:
+            raise
+        except Exception:
+            raise LLMInvocationError(
+                f"LLM async stream request failed for provider '{client.config.provider}'."
+            ) from None
+
     def _clone(self) -> LLMClient:
         clone = self.__class__(
             provider=self.config.provider,
@@ -188,6 +287,34 @@ class LLMClient:
             max_retries=self.max_retries,
             max_tool_rounds=self.max_tool_rounds,
             chat_model=self._model,
+        )
+        clone._tools = list(self._tools)
+        clone._tool_choice = self._tool_choice
+        return clone
+
+    def _request_client(
+        self,
+        provider: str | None,
+        model: str | None,
+        temperature: float | None,
+    ) -> LLMClient:
+        requested_provider = self.PROVIDER_ALIASES.get(provider.strip().lower(), provider.strip().lower()) if provider else None
+        same_provider = requested_provider in {None, self.config.provider}
+        same_model = model in {None, self.config.model}
+        same_temperature = temperature is None or float(temperature) == self.temperature
+        if same_provider and same_model and same_temperature:
+            return self
+
+        config = self.resolve(requested_provider or self.config.provider, model or self.config.model)
+        clone = self.__class__(
+            provider=config.provider,
+            model=config.model,
+            api_key=config.api_key or None,
+            base_url=config.base_url,
+            temperature=self.temperature if temperature is None else float(temperature),
+            timeout=self.timeout,
+            max_retries=self.max_retries,
+            max_tool_rounds=self.max_tool_rounds,
         )
         clone._tools = list(self._tools)
         clone._tool_choice = self._tool_choice

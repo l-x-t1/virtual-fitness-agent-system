@@ -1,13 +1,13 @@
 from app.ai.coach import AICoach
 from app.ai.knowledge_base import FitnessKnowledgeBase
-from app.ai.llm import AIProviderError, UnifiedLLM
 from app.ai.memory import ConversationStore
+from app.llm import LLMClient, LLMError
 from app.main import app
 
 
-class OfflineLLM(UnifiedLLM):
+class OfflineLLM(LLMClient):
     def chat(self, *args, **kwargs):
-        raise AIProviderError("offline")
+        raise LLMError("offline")
 
     def available(self):
         return [
@@ -158,29 +158,26 @@ def test_custom_knowledge_import_rebuilds_index(tmp_path):
     assert knowledge.stats()["total"] == 2
 
 
-def test_unified_llm_openai_compatible_request(monkeypatch):
-    monkeypatch.setenv("AI_DEEPSEEK_API_KEY", "test-key")
-    captured = {}
+def test_llmclient_openai_compatible_request():
+    class FakeChatModel:
+        def __init__(self):
+            self.messages = None
 
-    class Response:
-        def raise_for_status(self):
-            return None
+        def invoke(self, messages):
+            self.messages = messages
+            return "模型回答"
 
-        def json(self):
-            return {"choices": [{"message": {"content": "模型回答"}}]}
-
-    def fake_post(url, **kwargs):
-        captured["url"] = url
-        captured["headers"] = kwargs["headers"]
-        captured["payload"] = kwargs["json"]
-        return Response()
-
-    monkeypatch.setattr(httpx, "post", fake_post)
-    answer = UnifiedLLM().chat([{"role": "user", "content": "你好"}], "deepseek", "deepseek-chat")
+    model = FakeChatModel()
+    answer = LLMClient(
+        environ={
+            "LLM_PROVIDER": "deepseek",
+            "MODEL_NAME": "deepseek-chat",
+            "DEEPSEEK_API_KEY": "test-key",
+        },
+        chat_model=model,
+    ).chat([{"role": "user", "content": "你好"}], "deepseek", "deepseek-chat")
     assert answer == "模型回答"
-    assert captured["url"] == "https://api.deepseek.com/chat/completions"
-    assert captured["payload"]["model"] == "deepseek-chat"
-    assert captured["headers"]["Authorization"] == "Bearer test-key"
+    assert model.messages[-1].content == "你好"
 
 
 def test_provider_connection_reports_missing_key():
@@ -190,4 +187,3 @@ def test_provider_connection_reports_missing_key():
     assert result["provider"] == "deepseek"
 import json
 
-import httpx
