@@ -4,9 +4,9 @@ import json
 import re
 from typing import Any
 
-from app.ai.llm import AIProviderError
 from app.ai.rag.schemas import RewriteResult
 from app.agents.output_parser import OutputParser
+from app.llm import LLMError
 
 
 class QueryRewriter:
@@ -46,7 +46,7 @@ class QueryRewriter:
                         queries=queries,
                         mode="online",
                     )
-            except (AIProviderError, ValueError, TypeError, AttributeError):
+            except (LLMError, ValueError, TypeError, AttributeError):
                 pass
         return RewriteResult(
             original_query=original,

@@ -6,17 +6,17 @@ from fastapi import FastAPI
 from fastapi.testclient import TestClient
 
 from app.ai.coach import AICoach
-from app.ai.llm import AIProviderError, UnifiedLLM
 from app.ai.memory import ConversationStore
 from app.ai.sse import AIStreamOrchestrator, encode_sse
 from app.controllers import ai as ai_controller
 from app.dependencies.auth import get_current_user
+from app.llm import LLMClient, LLMError
 from app.observability.tracer import Tracer
 
 
-class OfflineLLM(UnifiedLLM):
+class OfflineLLM(LLMClient):
     def chat(self, *args, **kwargs):
-        raise AIProviderError("offline")
+        raise LLMError("offline")
 
     def available(self):
         return [{"provider": "deepseek", "default_model": "fake", "configured": False}]
