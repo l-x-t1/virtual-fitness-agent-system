@@ -6,7 +6,7 @@ from app.ai.rag.schemas import EvidenceDocument
 
 
 class VectorRetriever:
-    """Adapter over the existing FitnessKnowledgeBase FAISS/local vector index."""
+    """Adapter over the FitnessKnowledgeBase Chroma semantic vector index."""
 
     def __init__(self, knowledge_base: Any):
         self.knowledge_base = knowledge_base

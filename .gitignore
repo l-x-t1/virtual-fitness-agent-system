@@ -1,5 +1,6 @@
 __pycache__/
 data/*.db
+data/chroma/
 app/ai/data/*.db
 app/ai/data/*.db-journal
 app/ai/data/*.db-wal

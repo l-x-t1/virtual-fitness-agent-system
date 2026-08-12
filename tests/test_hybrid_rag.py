@@ -71,16 +71,16 @@ def test_bm25_chinese_keyword_recall():
     assert results[0].metadata["retrieval_backend"] in {"rank-bm25", "local-keyword"}
 
 
-def test_vector_recall_and_faiss_local_fallback(tmp_path):
+def test_vector_recall_and_chroma_local_fallback(tmp_path):
     source = tmp_path / "knowledge.json"
     source.write_text(json.dumps(docs(), ensure_ascii=False), encoding="utf-8")
     knowledge = FitnessKnowledgeBase(source=source, custom_source=tmp_path / "custom.json")
     normal = VectorRetriever(knowledge).retrieve("核心 平板支撑", top_k=2)
     assert any(item.source == "knowledge:plank" for item in normal)
-    knowledge._store = False
+    knowledge._ensure_vector_index = lambda: False
     fallback = VectorRetriever(knowledge).retrieve("核心 平板支撑", top_k=2)
     assert fallback
-    assert all(item.metadata["retrieval_backend"] == "local-cosine" for item in fallback)
+    assert all(item.metadata["retrieval_backend"] == "local-semantic" for item in fallback)
 
 
 def test_graph_unavailable_returns_empty_without_raising():

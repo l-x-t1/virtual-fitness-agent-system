@@ -1,49 +1,45 @@
 from __future__ import annotations
 
-import hashlib
 import json
-import math
-import re
+import os
 from typing import Any
 
 from langchain_core.documents import Document
 from langchain_core.embeddings import Embeddings
 
-
-class HashingEmbeddings(Embeddings):
-    """Deterministic, dependency-free embeddings suitable for offline fallback."""
-
-    def __init__(self, dimension: int = 384):
-        self.dimension = dimension
-
-    def embed_documents(self, texts: list[str]) -> list[list[float]]:
-        return [self.embed_query(text) for text in texts]
-
-    def embed_query(self, text: str) -> list[float]:
-        vector = [0.0] * self.dimension
-        for token in self._tokens(text):
-            digest = hashlib.blake2b(token.encode("utf-8"), digest_size=8).digest()
-            index = int.from_bytes(digest[:4], "big") % self.dimension
-            vector[index] += 1.0 if digest[4] % 2 == 0 else -1.0
-        norm = math.sqrt(sum(value * value for value in vector))
-        return vector if not norm else [value / norm for value in vector]
-
-    def _tokens(self, text: str) -> list[str]:
-        lowered = text.lower()
-        words = re.findall(r"[a-z0-9_]+", lowered)
-        chinese = "".join(char for char in lowered if "\u4e00" <= char <= "\u9fff")
-        chars = list(chinese)
-        bigrams = [chinese[index:index + 2] for index in range(max(0, len(chinese) - 1))]
-        return words + chars + bigrams
+from app.embeddings import SemanticEmbeddings
+from app.vectorstore import ChromaVectorStore
 
 
 class ExerciseVectorStore:
-    """In-memory semantic retrieval with FAISS and a deterministic local fallback."""
+    """Semantic exercise retrieval backed by persistent Chroma.
 
-    def __init__(self, embeddings: Embeddings | None = None, prefer_faiss: bool = True):
-        self.embeddings = embeddings or HashingEmbeddings()
-        self.prefer_faiss = prefer_faiss
+    ``prefer_faiss`` remains accepted for compatibility with older callers, but
+    FAISS is no longer used.  If Chroma is unavailable, the same semantic
+    embeddings are ranked in memory as an explicit local fallback.
+    """
+
+    def __init__(
+        self,
+        embeddings: Embeddings | None = None,
+        prefer_faiss: bool | None = None,
+        *,
+        persist_directory: str | None = None,
+        collection_name: str | None = None,
+    ):
+        self.embeddings = embeddings or SemanticEmbeddings()
+        self.persist_directory = persist_directory
+        self.collection_name = collection_name or os.getenv(
+            "EXERCISE_CHROMA_COLLECTION", "fitness-exercises"
+        )
+        self.vector_store = ChromaVectorStore(
+            collection_name=self.collection_name,
+            embeddings=self.embeddings,
+            persist_directory=persist_directory,
+        )
         self.last_backend = "uninitialized"
+        self.last_error: str | None = None
+        self._indexed_ids: set[str] = set()
 
     def search(
         self,
@@ -57,40 +53,53 @@ class ExerciseVectorStore:
         if not valid or top_k <= 0:
             self.last_backend = "empty"
             return []
+
         query = self._query_text(user, exercise_name, history or [])
         documents = [self._document(item) for item in valid]
-        if self.prefer_faiss:
-            try:
-                ranked = self._faiss_search(query, documents, valid, top_k)
-                self.last_backend = "faiss"
+        try:
+            self._sync_chroma(valid, documents)
+            results = self.vector_store.query(
+                query,
+                n_results=min(top_k, len(valid)),
+                where={"source": "exercise"},
+            )
+            by_id = {self._id_for(item): item for item in valid}
+            ranked = []
+            for result in results:
+                item = by_id.get(str(result["id"]))
+                if item is None:
+                    continue
+                similarity = self._distance_to_similarity(result.get("distance"))
+                document = Document(
+                    page_content=str(result.get("document") or ""),
+                    metadata=result.get("metadata") or {},
+                )
+                ranked.append(self._result(item, document, similarity, "chroma"))
+            if ranked:
+                self.last_backend = "chroma"
+                self.last_error = None
                 return ranked
-            except Exception:
-                # Import, native-library, and index-build failures all use the
-                # deterministic implementation so offline behavior is testable.
-                pass
-        self.last_backend = "local"
+        except Exception as exc:
+            self.last_error = str(exc)
+
+        self.last_backend = "local-semantic"
         return self._local_search(query, documents, valid, top_k)
 
-    def _faiss_search(
-        self,
-        query: str,
-        documents: list[Document],
-        exercises: list[dict[str, Any]],
-        top_k: int,
-    ) -> list[dict[str, Any]]:
-        from langchain_community.vectorstores import FAISS
-
-        store = FAISS.from_documents(documents, self.embeddings)
-        results = store.similarity_search_with_score(query, k=min(top_k, len(documents)))
-        by_name = {item["name"]: item for item in exercises}
-        ranked = []
-        for document, distance in results:
-            name = document.metadata.get("name")
-            if name not in by_name:
-                continue
-            similarity = max(0.0, 1.0 - float(distance) / 2.0)
-            ranked.append(self._result(by_name[name], document, similarity, "faiss"))
-        return ranked
+    def _sync_chroma(self, exercises: list[dict[str, Any]], documents: list[Document]) -> None:
+        ids = [self._id_for(item) for item in exercises]
+        current_ids = set(ids)
+        stale_ids = self._indexed_ids - current_ids
+        if stale_ids:
+            self.vector_store.delete(ids=sorted(stale_ids))
+        self.vector_store.upsert(
+            ids=ids,
+            documents=[document.page_content for document in documents],
+            metadatas=[
+                {"name": item["name"], "source": "exercise", "category": str(item.get("category") or "")}
+                for item in exercises
+            ],
+        )
+        self._indexed_ids = current_ids
 
     def _local_search(
         self,
@@ -105,11 +114,11 @@ class ExerciseVectorStore:
         )
         scored = []
         for item, document, vector in zip(exercises, documents, document_vectors):
-            similarity = sum(left * right for left, right in zip(query_vector, vector))
+            similarity = self._cosine(query_vector, vector)
             scored.append((similarity, item, document))
         scored.sort(key=lambda row: (-row[0], row[1]["name"]))
         return [
-            self._result(item, document, max(0.0, similarity), "local")
+            self._result(item, document, max(0.0, similarity), "local-semantic")
             for similarity, item, document in scored[: min(top_k, len(scored))]
         ]
 
@@ -120,10 +129,11 @@ class ExerciseVectorStore:
         similarity: float,
         backend: str,
     ) -> dict[str, Any]:
+        score = round(min(100.0, max(0.0, similarity) * 100.0), 1)
         return {
             **item,
-            "retrieval_score": round(min(100.0, similarity * 100.0), 1),
-            "rag_score": round(min(100.0, similarity * 100.0), 1),
+            "retrieval_score": score,
+            "rag_score": score,
             "rag_context": document.page_content,
             "retrieval_backend": backend,
         }
@@ -135,7 +145,7 @@ class ExerciseVectorStore:
                 standard = json.loads(item.get("standard_json") or "{}")
             except (TypeError, json.JSONDecodeError):
                 standard = {}
-        content = "；".join(
+        content = "\n".join(
             [
                 f"动作：{item.get('name', '')}",
                 f"类别：{item.get('category', '')}",
@@ -165,8 +175,24 @@ class ExerciseVectorStore:
             f"年龄：{user.get('age', '')}",
         ]
         if history:
-            names = [str(item.get("exercise_name") or item.get("name") or "") for item in history[-10:]]
+            names = [
+                str(item.get("exercise_name") or item.get("name") or "")
+                for item in history[-10:]
+            ]
             parts.append("训练历史：" + "、".join(name for name in names if name))
         if exercise_name:
             parts.append(f"当前动作：{exercise_name}")
-        return "；".join(parts)
+        return "\n".join(parts)
+
+    def _id_for(self, item: dict[str, Any]) -> str:
+        return f"exercise-{item.get('id') or item.get('name')}"
+
+    def _distance_to_similarity(self, distance: Any) -> float:
+        try:
+            return max(0.0, min(1.0, 1.0 - float(distance)))
+        except (TypeError, ValueError):
+            return 0.0
+
+    def _cosine(self, left: list[float], right: list[float]) -> float:
+        size = min(len(left), len(right))
+        return max(0.0, sum(left[index] * right[index] for index in range(size)))
