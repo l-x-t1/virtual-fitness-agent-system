@@ -1,7 +1,7 @@
 """
-Neo4j 向量存储 — 用 Neo4j 原生向量索引替代 FAISS
+Neo4j 向量存储 - 使用 Neo4j 原生向量索引。
 
-要求 Neo4j 5.x+，向量索引创建见 tools/init_graph.cypher 末尾
+要求 Neo4j 5.x+，向量索引创建见 tools/init_graph.cypher 末尾。
 """
 
 from __future__ import annotations

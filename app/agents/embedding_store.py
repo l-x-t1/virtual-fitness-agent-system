@@ -13,16 +13,11 @@ from app.vectorstore import ChromaVectorStore
 
 class ExerciseVectorStore:
     """Semantic exercise retrieval backed by persistent Chroma.
-
-    ``prefer_faiss`` remains accepted for compatibility with older callers, but
-    FAISS is no longer used.  If Chroma is unavailable, the same semantic
-    embeddings are ranked in memory as an explicit local fallback.
     """
 
     def __init__(
         self,
         embeddings: Embeddings | None = None,
-        prefer_faiss: bool | None = None,
         *,
         persist_directory: str | None = None,
         collection_name: str | None = None,
@@ -82,7 +77,7 @@ class ExerciseVectorStore:
         except Exception as exc:
             self.last_error = str(exc)
 
-        self.last_backend = "local-semantic"
+        self.last_backend = "local"
         return self._local_search(query, documents, valid, top_k)
 
     def _sync_chroma(self, exercises: list[dict[str, Any]], documents: list[Document]) -> None:
@@ -118,7 +113,7 @@ class ExerciseVectorStore:
             scored.append((similarity, item, document))
         scored.sort(key=lambda row: (-row[0], row[1]["name"]))
         return [
-            self._result(item, document, max(0.0, similarity), "local-semantic")
+            self._result(item, document, max(0.0, similarity), "local")
             for similarity, item, document in scored[: min(top_k, len(scored))]
         ]
 

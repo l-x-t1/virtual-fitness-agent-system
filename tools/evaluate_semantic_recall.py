@@ -41,7 +41,7 @@ DOCUMENTS = [
 ]
 
 
-class LegacyHashingEmbeddings:
+class LegacyLexicalEmbeddings:
     def __init__(self, dimension: int = 384):
         self.dimension = dimension
 
@@ -99,20 +99,20 @@ def evaluate(cases: list[dict], embedding, top_k: int = 3) -> dict:
 
 
 def main() -> None:
-    parser = argparse.ArgumentParser(description="Compare legacy hashing recall with semantic embeddings.")
+    parser = argparse.ArgumentParser(description="Compare legacy lexical recall with semantic embeddings.")
     parser.add_argument("--cases", default="tests/fixtures/fitness_semantic_recall_cases.json")
     parser.add_argument("--top-k", type=int, default=3)
     parser.add_argument("--json", action="store_true")
     args = parser.parse_args()
 
     cases = json.loads((ROOT / args.cases).read_text(encoding="utf-8"))
-    legacy = evaluate(cases, LegacyHashingEmbeddings(), args.top_k)
+    legacy = evaluate(cases, LegacyLexicalEmbeddings(), args.top_k)
     semantic = evaluate(cases, SemanticEmbeddings(), args.top_k)
-    payload = {"top_k": args.top_k, "legacy_hashing": legacy, "semantic": semantic}
+    payload = {"top_k": args.top_k, "legacy_lexical": legacy, "semantic": semantic}
     if args.json:
         print(json.dumps(payload, ensure_ascii=False, indent=2))
         return
-    print(f"Recall@{args.top_k} legacy hashing: {legacy['hits']}/{legacy['total']} = {legacy['recall_at_k']}")
+    print(f"Recall@{args.top_k} legacy lexical: {legacy['hits']}/{legacy['total']} = {legacy['recall_at_k']}")
     print(f"Recall@{args.top_k} semantic:       {semantic['hits']}/{semantic['total']} = {semantic['recall_at_k']}")
 
 

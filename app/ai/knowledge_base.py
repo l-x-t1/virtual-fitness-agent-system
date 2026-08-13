@@ -169,7 +169,7 @@ class FitnessKnowledgeBase:
                 **item,
                 "distance": None,
                 "similarity": round(score, 6),
-                "vector_backend": "local-semantic",
+                "vector_backend": "local",
             }
             for score, item in ranked[: min(max(1, top_k), len(ranked))]
         ]

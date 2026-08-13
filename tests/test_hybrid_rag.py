@@ -80,7 +80,7 @@ def test_vector_recall_and_chroma_local_fallback(tmp_path):
     knowledge._ensure_vector_index = lambda: False
     fallback = VectorRetriever(knowledge).retrieve("核心 平板支撑", top_k=2)
     assert fallback
-    assert all(item.metadata["retrieval_backend"] == "local-semantic" for item in fallback)
+    assert all(item.metadata["retrieval_backend"] == "local" for item in fallback)
 
 
 def test_graph_unavailable_returns_empty_without_raising():

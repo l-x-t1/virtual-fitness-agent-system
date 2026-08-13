@@ -13,12 +13,7 @@ class EmbeddingConfigurationError(RuntimeError):
 
 
 class _LexicalSemanticFallback:
-    """Small offline fallback used only when the local model is unavailable.
-
-    This is deliberately not a hashing embedding.  It uses a fixed set of
-    fitness concepts so local tests and offline development remain usable while
-    production can use the configured BGE model.
-    """
+    """Offline fallback used only when the local model is unavailable."""
 
     _CONCEPTS = (
         ("\u6df1\u8e72", "\u4e0b\u80a2 \u817f \u81c0 \u819d \u52a8\u4f5c"),
@@ -67,8 +62,7 @@ class SemanticEmbeddings(Embeddings):
 
     The model is loaded lazily so importing the FastAPI application does not
     download a model.  Pass a fake ``model`` in unit tests to avoid network or
-    GPU requirements.  The offline fallback is explicit and never uses token
-    hashing.
+    GPU requirements.
     """
 
     DEFAULT_MODEL = "BAAI/bge-small-zh-v1.5"

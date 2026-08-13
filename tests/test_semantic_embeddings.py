@@ -4,7 +4,7 @@ import json
 from pathlib import Path
 
 from app.embeddings import SemanticEmbeddings
-from tools.evaluate_semantic_recall import LegacyHashingEmbeddings, evaluate
+from tools.evaluate_semantic_recall import LegacyLexicalEmbeddings, evaluate
 
 
 def test_semantic_embeddings_follow_langchain_protocol():
@@ -16,11 +16,11 @@ def test_semantic_embeddings_follow_langchain_protocol():
     assert embeddings.backend in {"sentence-transformers", "offline-lexical"}
 
 
-def test_semantic_recall_beats_or_matches_legacy_hashing():
+def test_semantic_recall_beats_or_matches_legacy_lexical():
     cases = json.loads(
         Path("tests/fixtures/fitness_semantic_recall_cases.json").read_text(encoding="utf-8")
     )
-    legacy = evaluate(cases, LegacyHashingEmbeddings(), top_k=3)
+    legacy = evaluate(cases, LegacyLexicalEmbeddings(), top_k=3)
     semantic = evaluate(cases, SemanticEmbeddings(allow_fallback=True), top_k=3)
     assert len(cases) == 25
     assert semantic["recall_at_k"] >= legacy["recall_at_k"]

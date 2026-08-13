@@ -7,7 +7,7 @@ The project now uses `SemanticEmbeddings`, a LangChain `Embeddings` adapter.
 - Default model: `BAAI/bge-small-zh-v1.5`
 - Loader: `sentence-transformers`
 - Protocol: `embed_documents(texts)` and `embed_query(text)`
-- Test/offline fallback: concept-based semantic fallback, not `HashingEmbeddings`
+- Offline fallback: local semantic fallback for environments without the model
 
 Recommended `.env` values:
 
@@ -26,7 +26,7 @@ files first and uses the offline semantic fallback if they are unavailable.
 
 ## Vector Store
 
-FAISS has been replaced by Chroma through `ChromaVectorStore`.
+Chroma is the default vector store through `ChromaVectorStore`.
 
 Capabilities used by the project:
 
@@ -47,7 +47,7 @@ memory and summaries are also synchronized into Chroma for semantic recall.
 
 ## Evaluation
 
-`tools/evaluate_semantic_recall.py` compares the old hashing algorithm with the
+`tools/evaluate_semantic_recall.py` compares the legacy lexical baseline with the
 new semantic embedding retrieval over 25 fitness scenarios:
 
 ```bash
