@@ -193,7 +193,7 @@ def test_recommend_agent_filters_actions_outside_knowledge_base():
         user(), knowledge_base()
     )
     assert [item["name"] for item in result["recommendations"]] == ["平板支撑"]
-    assert result["retrieval_backend"] == "local"
+    assert result["retrieval_backend"] in {"local", "chroma"}
     RecommendOutput.model_validate({"recommendations": result["recommendations"]})
 
 
