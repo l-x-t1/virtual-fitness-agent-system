@@ -1,7 +1,7 @@
 """多智能体协作系统的共享状态定义（AgentState）。
 
-该状态由 LangGraph 在 5 个节点（规划/推荐/评估/激励/报告）之间传递，
-所有节点共享同一份状态，各自更新自己负责的字段。
+状态是节点之间唯一的通信渠道。路由、有限重试、GraphRAG 上下文和
+降级原因均由 LangGraph 通过该状态管理。
 """
 
 from __future__ import annotations
@@ -22,9 +22,18 @@ class AgentState(TypedDict, total=False):
       motivation:      激励内容（字符串）
       report:          最终报告（总结 / 数据 / 下一步建议）
       current_step:    当前执行步骤（planning/recommending/evaluating/motivating/reporting）
-      next_step:       下一步骤（用于分支判断）
-      retry_count:     评估不通过时的重试次数（内部字段，防止死循环）
-      error:           错误信息（失败时回退用）
+      next_step:       兼容旧调用方的下一节点名称
+      route:           conditional_edges 使用的显式路由值
+      graph_context:   GraphRAG 只读检索结果或不可用状态
+      retry_count:     当前重试次数
+      max_retries:     最大重试次数
+      error:           结构化错误信息
+      failed_step:     最近失败的节点
+      retryable:       最近错误是否允许重试
+      fallback_reason: 进入降级流程的原因
+      completed_steps: 已完成节点（追加式累积）
+      trace_id:        可选可观测链路 ID
+      session_id:      可选会话 ID
     """
 
     messages: Annotated[list[dict[str, Any]], operator.add]
@@ -34,7 +43,16 @@ class AgentState(TypedDict, total=False):
     evaluation: dict[str, Any]
     motivation: str
     report: dict[str, Any]
+    graph_context: dict[str, Any]
     current_step: str
     next_step: str
+    route: str
     retry_count: int
-    error: str
+    max_retries: int
+    error: dict[str, Any] | str
+    failed_step: str
+    retryable: bool
+    fallback_reason: str
+    completed_steps: Annotated[list[str], operator.add]
+    trace_id: str
+    session_id: str
