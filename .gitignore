@@ -9,6 +9,7 @@ app/ai/data/fitness_knowledge_custom.json
 *.pyc
 .env
 fitness.db
+.pytest-tmp/
 server.log
 server.err.log
 tmp_server.out.log
