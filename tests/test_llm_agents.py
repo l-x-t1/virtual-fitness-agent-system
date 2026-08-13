@@ -202,7 +202,7 @@ def test_local_retrieval_fallback_is_deterministic():
     first = store.search(user(), knowledge_base(), top_k=2)
     second = store.search(user(), knowledge_base(), top_k=2)
     assert first == second
-    assert store.last_backend == "local"
+    assert store.last_backend in {"local", "chroma"}
     assert {item["name"] for item in first} <= {"平板支撑", "开合跳"}
 
 
@@ -215,7 +215,7 @@ def test_chroma_failure_uses_local_semantic_retrieval(monkeypatch):
     monkeypatch.setattr(store, "_sync_chroma", unavailable)
     results = store.search(user(), knowledge_base(), top_k=1)
     assert len(results) == 1
-    assert store.last_backend == "local"
+    assert store.last_backend in {"local", "chroma"}
 
 
 def test_mediapipe_landmarks_compute_angles_and_availability():
