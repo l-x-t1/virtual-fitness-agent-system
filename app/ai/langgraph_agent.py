@@ -1,10 +1,8 @@
 """多智能体协作系统（LangGraph 调度层）。
 
-流程：
-  用户输入 → planning_agent → recommend_agent → evaluate_agent
-      ├─ 评估通过(score>=70) → motivate_agent → report_agent → 输出
-      └─ 评估不通过 → 回到 recommend_agent（补充条件重试）
-  任一节点异常 → error_handler → 返回友好错误信息
+流程由 LangGraph 原生 conditional_edges 根据 AgentState 驱动：
+  START → planning_agent → 业务节点 / GraphRAG 节点 / fallback
+  业务节点异常 → error_handler → 有限重试 / fallback → END
 
 使用人员1（工具调用基础层）的 LLMClient.bind_tools 与 RecommendAgent 工具，
 不改动其 llm_client.py / tools.py / agents.py。
@@ -14,7 +12,8 @@ from __future__ import annotations
 
 import json
 import logging
-from typing import Any, Callable
+from functools import wraps
+from typing import Any, Callable, Literal
 
 from langgraph.graph import END, START, StateGraph
 
@@ -23,17 +22,9 @@ from app.llm.client import LLMClient, LLMConfigurationError
 
 logger = logging.getLogger(__name__)
 
-MAX_RETRY = 2  # 评估不通过的最大重试次数
+MAX_RETRY = 2  # 兼容旧常量名；State 中可通过 max_retries 覆盖
 
-# 节点名集合（供路由判断用）
-_NODES = {
-    "planning_agent",
-    "recommend_agent",
-    "evaluate_agent",
-    "motivate_agent",
-    "report_agent",
-    "error_handler",
-}
+BusinessRoute = Literal["recommend", "evaluate", "motivate", "report", "graphrag", "fallback"]
 
 
 # ============================================================
@@ -65,15 +56,29 @@ def _safe_step(name: str, fn: Callable | None = None):
     """
 
     def decorator(func: Callable[[AgentState], dict[str, Any]]):
+        @wraps(func)
         def wrapped(state: AgentState) -> dict[str, Any]:
             try:
-                return func(state)
+                update = dict(func(state))
+                update.setdefault("error", {})
+                update.setdefault("failed_step", "")
+                update.setdefault("retryable", False)
+                update.setdefault("completed_steps", [name])
+                return update
             except Exception as exc:  # noqa: BLE001 - 顶层兜底
                 logger.exception("%s failed", name)
                 return {
-                    "error": f"{name}: {exc}",
+                    "error": {
+                        "node": name,
+                        "code": "NODE_EXECUTION_FAILED",
+                        "message": "工作流节点执行失败",
+                        "exception_type": type(exc).__name__,
+                    },
+                    "failed_step": name,
+                    "retryable": True,
                     "current_step": "error_handler",
                     "next_step": "error_handler",
+                    "route": "error",
                 }
 
         return wrapped
@@ -153,6 +158,28 @@ def _extract_constraints(user_info: dict[str, Any], message: str) -> list[str]:
     return constraints
 
 
+def _classify_request(message: str) -> BusinessRoute:
+    """确定性意图路由；只决定下一节点，不执行业务逻辑。"""
+    text = (message or "").strip()
+    if any(k in text for k in ("报告", "周报", "月报", "总结", "复盘")):
+        return "report"
+    if any(k in text for k in ("鼓励", "激励", "没动力", "坚持不下去", "打气")):
+        return "motivate"
+    if any(k in text for k in ("评估", "纠错", "动作对不对", "姿势", "关键点")):
+        return "evaluate"
+    if any(k in text for k in ("为什么", "原理", "知识", "怎么保护", "疼怎么办", "痛怎么办")):
+        return "graphrag"
+    if any(
+        k in text
+        for k in (
+            "训练", "健身", "运动", "计划", "推荐", "减脂", "减肥", "增肌",
+            "塑形", "练胸", "练背", "练腿", "康复", "恢复", "随便练练",
+        )
+    ):
+        return "recommend"
+    return "fallback"
+
+
 @_safe_step("planning_agent")
 def planning_agent(state: AgentState) -> dict[str, Any]:
     messages = state.get("messages") or []
@@ -172,11 +199,96 @@ def planning_agent(state: AgentState) -> dict[str, Any]:
             "constraints": _extract_constraints(user_info, user_message),
         }
 
+    route = _classify_request(user_message)
+    node_by_route = {
+        "recommend": "recommend_agent",
+        "evaluate": "evaluate_agent",
+        "motivate": "motivate_agent",
+        "report": "report_agent",
+        "graphrag": "graphrag_node",
+        "fallback": "fallback_node",
+    }
     return {
         "task_plan": plan,
-        "current_step": "recommending",
-        "next_step": "recommend_agent",
+        "current_step": "planned",
+        "next_step": node_by_route[route],
+        "route": route,
     }
+
+
+# ============================================================
+# GraphRAG 节点（仅通过 GraphService 公开只读接口）
+# ============================================================
+
+def _make_graph_service():
+    from app.services.graph_service import get_graph_service
+
+    return get_graph_service()
+
+
+def _last_user_message(state: AgentState) -> str:
+    for message in reversed(state.get("messages") or []):
+        if message.get("role") == "user":
+            return str(message.get("content") or "")
+    return ""
+
+
+def graphrag_node(state: AgentState) -> dict[str, Any]:
+    """把 GraphRAG 公开返回写入 State；图服务不可用时安全降级。"""
+    question = _last_user_message(state)
+    user_id = (state.get("user_info") or {}).get("id")
+    try:
+        service = _make_graph_service()
+        status = service.status()
+        available = bool(
+            status.get("available", False)
+            if isinstance(status, dict)
+            else getattr(status, "available", False)
+        )
+        if not available:
+            return {
+                "graph_context": {
+                    "status": "unavailable",
+                    "query": question,
+                    "knowledge": [],
+                    "relations": [],
+                    "reason": "neo4j_unavailable",
+                },
+                "fallback_reason": "neo4j_unavailable",
+                "current_step": "reporting",
+                "next_step": "report_agent",
+                "route": "report",
+                "completed_steps": ["graphrag_node"],
+            }
+        try:
+            graph_user_id = int(user_id) if user_id is not None else None
+        except (TypeError, ValueError):
+            graph_user_id = None
+        result = service.search(question, user_id=graph_user_id, top_k=8, use_llm=False)
+        payload = result.model_dump() if hasattr(result, "model_dump") else dict(result)
+        return {
+            "graph_context": {"status": "available", **payload},
+            "current_step": "reporting",
+            "next_step": "report_agent",
+            "route": "report",
+            "completed_steps": ["graphrag_node"],
+        }
+    except Exception as exc:  # GraphRAG 是可选增强，失败不阻断主流程
+        logger.warning("GraphRAG node unavailable: %s", type(exc).__name__)
+        return {
+            "graph_context": {
+                "status": "unavailable",
+                "query": question,
+                "knowledge": [],
+                "relations": [],
+                "reason": "graphrag_failed",
+            },
+            "fallback_reason": "graphrag_failed",
+            "current_step": "reporting",
+            "next_step": "report_agent",
+            "route": "report",
+            "completed_steps": ["graphrag_node"],
+        }
 
 
 # ============================================================
@@ -221,11 +333,7 @@ def recommend_agent(state: AgentState) -> dict[str, Any]:
             result = agent.recommend(user_info)
             recommendations = result.get("exercises") or result.get("recommendations") or []
         except Exception as exc:  # pragma: no cover
-            return {
-                "error": f"recommend_agent: {exc}",
-                "current_step": "error_handler",
-                "next_step": "error_handler",
-            }
+            raise RuntimeError("recommendation unavailable") from exc
 
     # 将推荐结果追加到消息历史
     msg = {
@@ -237,6 +345,7 @@ def recommend_agent(state: AgentState) -> dict[str, Any]:
         "recommendations": recommendations,
         "current_step": "evaluating",
         "next_step": "evaluate_agent",
+        "route": "evaluate",
         "retry_count": retry_count,
         "messages": [msg],
     }
@@ -321,11 +430,22 @@ def evaluate_agent(state: AgentState) -> dict[str, Any]:
         evaluation = _heuristic_evaluate(user_info, plan, recs)
     evaluation["passed"] = float(evaluation.get("score", 0)) >= 70
 
-    if evaluation["passed"] or retry_count >= MAX_RETRY:
+    max_retries = int(state.get("max_retries", MAX_RETRY))
+    if evaluation["passed"]:
         return {
             "evaluation": evaluation,
             "current_step": "motivating",
             "next_step": "motivate_agent",
+            "route": "motivate",
+            "retry_count": retry_count,
+        }
+    if retry_count >= max_retries:
+        return {
+            "evaluation": evaluation,
+            "current_step": "fallback",
+            "next_step": "fallback_node",
+            "route": "fallback",
+            "fallback_reason": "evaluation_retry_exhausted",
             "retry_count": retry_count,
         }
     # 不通过：回到推荐节点重新推荐
@@ -333,6 +453,7 @@ def evaluate_agent(state: AgentState) -> dict[str, Any]:
         "evaluation": evaluation,
         "current_step": "recommending",
         "next_step": "recommend_agent",
+        "route": "recommend",
         "retry_count": retry_count + 1,
     }
 
@@ -376,6 +497,7 @@ def motivate_agent(state: AgentState) -> dict[str, Any]:
         "motivation": motivation,
         "current_step": "reporting",
         "next_step": "report_agent",
+        "route": "report",
     }
 
 
@@ -403,19 +525,22 @@ def report_agent(state: AgentState) -> dict[str, Any]:
     recs = state.get("recommendations") or []
     evaluation = state.get("evaluation") or {}
     motivation = state.get("motivation") or ""
+    graph_context = state.get("graph_context") or {}
 
     state_snapshot = {
         "task_plan": plan,
         "recommendations": recs,
         "evaluation": evaluation,
         "motivation": motivation,
+        "graph_context": graph_context,
     }
     report = _report_via_llm(state_snapshot)
     if not report:
+        graph_answer = str(graph_context.get("answer") or "").strip()
         goal = plan.get("goal", "综合训练")
         names = [item.get("name", "") for item in recs[:5]]
         report = {
-            "summary": f"已为你的「{goal}」目标生成训练方案，共推荐 {len(names)} 个动作。",
+            "summary": graph_answer or f"已为你的「{goal}」目标生成训练方案，共推荐 {len(names)} 个动作。",
             "plan": [f"动作：{name}" for name in names] or ["请补充画像后重新推荐"],
             "expected": "坚持执行并记录表现，2-4 周可观察到改善。",
             "motivation": motivation,
@@ -425,6 +550,7 @@ def report_agent(state: AgentState) -> dict[str, Any]:
         "report": report,
         "current_step": "done",
         "next_step": "__end__",
+        "route": "end",
     }
 
 
@@ -432,18 +558,52 @@ def report_agent(state: AgentState) -> dict[str, Any]:
 # 错误处理节点
 # ============================================================
 
-@_safe_step("error_handler")
 def error_handler(state: AgentState) -> dict[str, Any]:
-    # 保留 state.error 供调用方排查；error_handler 的出边是直达 END，不会循环
+    failed_step = str(state.get("failed_step") or "")
+    retry_count = int(state.get("retry_count") or 0)
+    max_retries = int(state.get("max_retries", MAX_RETRY))
+    retryable = bool(state.get("retryable"))
+    retry_nodes = {
+        "planning_agent", "recommend_agent", "evaluate_agent",
+        "motivate_agent", "report_agent",
+    }
+    if retryable and failed_step in retry_nodes and retry_count < max_retries:
+        return {
+            "retry_count": retry_count + 1,
+            "current_step": "retrying",
+            "next_step": failed_step,
+            "route": f"retry_{failed_step}",
+            "error": {},
+            "retryable": False,
+            "completed_steps": ["error_handler"],
+        }
+    return {
+        "current_step": "fallback",
+        "next_step": "fallback_node",
+        "route": "fallback",
+        "fallback_reason": (
+            "retry_exhausted" if retryable and retry_count >= max_retries else "non_retryable_error"
+        ),
+        "completed_steps": ["error_handler"],
+    }
+
+
+def fallback_node(state: AgentState) -> dict[str, Any]:
+    reason = state.get("fallback_reason") or "unsupported_intent"
     return {
         "report": {
-            "summary": "处理过程中出现问题，请稍后重试或补充更完整的个人画像。",
+            "summary": "当前请求已进入安全降级流程，请补充明确的训练目标或稍后重试。",
             "plan": [],
             "expected": "",
-            "motivation": "别担心，我们可以重新来过。",
+            "motivation": "别担心，我们可以重新规划。",
+            "fallback": True,
+            "fallback_reason": reason,
         },
         "current_step": "done",
         "next_step": "__end__",
+        "route": "end",
+        "fallback_reason": reason,
+        "completed_steps": ["fallback_node"],
     }
 
 
@@ -451,39 +611,87 @@ def error_handler(state: AgentState) -> dict[str, Any]:
 # 构建流程图
 # ============================================================
 
-def _route(state: AgentState) -> str:
+def planning_router(state: AgentState) -> str:
+    route = state.get("route") or "fallback"
+    return route if route in {"recommend", "evaluate", "motivate", "report", "graphrag", "fallback"} else "fallback"
+
+
+def graph_router(state: AgentState) -> str:
+    return "error" if state.get("error") else "report"
+
+
+def recommend_router(state: AgentState) -> str:
+    return "error" if state.get("error") else "evaluate"
+
+
+def evaluate_router(state: AgentState) -> str:
     if state.get("error"):
-        return "error_handler"
-    nxt = state.get("next_step") or "error_handler"
-    return nxt if nxt in _NODES or nxt == "__end__" else "error_handler"
+        return "error"
+    route = state.get("route") or "fallback"
+    return route if route in {"recommend", "motivate", "fallback"} else "fallback"
+
+
+def motivate_router(state: AgentState) -> str:
+    return "error" if state.get("error") else "report"
+
+
+def report_router(state: AgentState) -> str:
+    return "error" if state.get("error") else "end"
+
+
+def retry_router(state: AgentState) -> str:
+    route = state.get("route") or "fallback"
+    allowed = {
+        "retry_planning_agent", "retry_recommend_agent", "retry_evaluate_agent",
+        "retry_motivate_agent", "retry_report_agent", "fallback",
+    }
+    return route if route in allowed else "fallback"
 
 
 def build_graph():
     graph = StateGraph(AgentState)
 
     graph.add_node("planning_agent", planning_agent)
+    graph.add_node("graphrag_node", graphrag_node)
     graph.add_node("recommend_agent", recommend_agent)
     graph.add_node("evaluate_agent", evaluate_agent)
     graph.add_node("motivate_agent", motivate_agent)
     graph.add_node("report_agent", report_agent)
     graph.add_node("error_handler", error_handler)
+    graph.add_node("fallback_node", fallback_node)
 
     graph.add_edge(START, "planning_agent")
 
-    path_map = {
-        "planning_agent": "planning_agent",
-        "recommend_agent": "recommend_agent",
-        "evaluate_agent": "evaluate_agent",
-        "motivate_agent": "motivate_agent",
-        "report_agent": "report_agent",
-        "error_handler": "error_handler",
-        "__end__": END,
-    }
-    # 除 error_handler 外的节点都走条件路由（error → error_handler，否则按 next_step）
-    for node_name in _NODES - {"error_handler"}:
-        graph.add_conditional_edges(node_name, _route, path_map)
-    # error_handler 处理后直达结束，避免 error 残留导致循环
-    graph.add_edge("error_handler", END)
+    graph.add_conditional_edges("planning_agent", planning_router, {
+        "recommend": "recommend_agent", "evaluate": "evaluate_agent",
+        "motivate": "motivate_agent", "report": "report_agent",
+        "graphrag": "graphrag_node", "fallback": "fallback_node",
+    })
+    graph.add_conditional_edges("graphrag_node", graph_router, {
+        "report": "report_agent", "error": "error_handler",
+    })
+    graph.add_conditional_edges("recommend_agent", recommend_router, {
+        "evaluate": "evaluate_agent", "error": "error_handler",
+    })
+    graph.add_conditional_edges("evaluate_agent", evaluate_router, {
+        "recommend": "recommend_agent", "motivate": "motivate_agent",
+        "fallback": "fallback_node", "error": "error_handler",
+    })
+    graph.add_conditional_edges("motivate_agent", motivate_router, {
+        "report": "report_agent", "error": "error_handler",
+    })
+    graph.add_conditional_edges("report_agent", report_router, {
+        "end": END, "error": "error_handler",
+    })
+    graph.add_conditional_edges("error_handler", retry_router, {
+        "retry_planning_agent": "planning_agent",
+        "retry_recommend_agent": "recommend_agent",
+        "retry_evaluate_agent": "evaluate_agent",
+        "retry_motivate_agent": "motivate_agent",
+        "retry_report_agent": "report_agent",
+        "fallback": "fallback_node",
+    })
+    graph.add_edge("fallback_node", END)
 
     compiled = graph.compile()
     compiled.name = "fitness_multi_agent"  # 可选：命名编译图
@@ -514,10 +722,17 @@ async def run_agent(user_message: str, user_id: int | str) -> dict[str, Any]:
         "evaluation": {},
         "motivation": "",
         "report": {},
+        "graph_context": {},
         "current_step": "planning",
         "next_step": "planning_agent",
+        "route": "planning",
         "retry_count": 0,
-        "error": "",
+        "max_retries": MAX_RETRY,
+        "error": {},
+        "failed_step": "",
+        "retryable": False,
+        "fallback_reason": "",
+        "completed_steps": [],
     }
 
     result = await compiled_graph.ainvoke(initial)
