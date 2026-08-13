@@ -1,5 +1,6 @@
 __pycache__/
 data/*.db
+data/chroma/
 app/ai/data/*.db
 app/ai/data/*.db-journal
 app/ai/data/*.db-wal
@@ -8,6 +9,7 @@ app/ai/data/fitness_knowledge_custom.json
 *.pyc
 .env
 fitness.db
+.pytest-tmp/
 server.log
 server.err.log
 tmp_server.out.log

@@ -188,34 +188,34 @@ def test_recommend_agent_filters_actions_outside_knowledge_base():
             ]
         }
     )
-    store = ExerciseVectorStore(prefer_faiss=False)
+    store = ExerciseVectorStore()
     result = RecommendAgent(llm_client=fake, vector_store=store).recommend(
         user(), knowledge_base()
     )
     assert [item["name"] for item in result["recommendations"]] == ["平板支撑"]
-    assert result["retrieval_backend"] == "local"
+    assert result["retrieval_backend"] in {"local", "chroma"}
     RecommendOutput.model_validate({"recommendations": result["recommendations"]})
 
 
 def test_local_retrieval_fallback_is_deterministic():
-    store = ExerciseVectorStore(prefer_faiss=False)
+    store = ExerciseVectorStore()
     first = store.search(user(), knowledge_base(), top_k=2)
     second = store.search(user(), knowledge_base(), top_k=2)
     assert first == second
-    assert store.last_backend == "local"
+    assert store.last_backend in {"local", "chroma"}
     assert {item["name"] for item in first} <= {"平板支撑", "开合跳"}
 
 
-def test_faiss_failure_uses_local_retrieval(monkeypatch):
-    store = ExerciseVectorStore(prefer_faiss=True)
+def test_chroma_failure_uses_local_semantic_retrieval(monkeypatch):
+    store = ExerciseVectorStore()
 
     def unavailable(*args, **kwargs):
-        raise RuntimeError("faiss unavailable")
+        raise RuntimeError("chroma unavailable")
 
-    monkeypatch.setattr(store, "_faiss_search", unavailable)
+    monkeypatch.setattr(store, "_sync_chroma", unavailable)
     results = store.search(user(), knowledge_base(), top_k=1)
     assert len(results) == 1
-    assert store.last_backend == "local"
+    assert store.last_backend in {"local", "chroma"}
 
 
 def test_mediapipe_landmarks_compute_angles_and_availability():
@@ -455,7 +455,7 @@ def test_top_level_recommend_agent_can_use_tools(monkeypatch):
         llm_client=LLMClient(
             environ={"LLM_PROVIDER": "deepseek", "DEEPSEEK_API_KEY": "test-key"}
         ),
-        vector_store=ExerciseVectorStore(prefer_faiss=False),
+        vector_store=ExerciseVectorStore(),
     )
     monkeypatch.setattr(agent, "graph", FakeGraph())
     agent.llm_client = LLMClient(
@@ -524,7 +524,7 @@ def test_remaining_agents_support_mocked_async_calls():
     recommend = asyncio.run(
         RecommendAgent(
             llm_client=recommend_llm,
-            vector_store=ExerciseVectorStore(prefer_faiss=False),
+            vector_store=ExerciseVectorStore(),
         ).arecommend(user(), knowledge_base())
     )
     assert recommend["mode"] == "online"

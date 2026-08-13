@@ -11,7 +11,8 @@ from threading import RLock
 from typing import Any
 from uuid import uuid4
 
-from app.agents.embedding_store import HashingEmbeddings
+from app.embeddings import SemanticEmbeddings
+from app.vectorstore import ChromaVectorStore
 
 
 DEFAULT_SHORT_TERM_TURNS = 10
@@ -70,7 +71,7 @@ class ConversationStore:
         self.ttl = timedelta(hours=ttl_hours or int(os.getenv("AI_SESSION_TTL_HOURS", "720")))
         self.long_term_top_k = int(os.getenv("AI_LONG_TERM_TOP_K", str(DEFAULT_LONG_TERM_TOP_K)))
         self.summary_every_turns = int(os.getenv("AI_SUMMARY_EVERY_TURNS", str(DEFAULT_SUMMARY_EVERY_TURNS)))
-        self.embeddings = HashingEmbeddings(int(os.getenv("AI_MEMORY_EMBEDDING_DIM", "384")))
+        self.embeddings = SemanticEmbeddings()
         default_path = Path(__file__).with_name("data") / "ai_sessions.db"
         self.db_path = str(db_path or os.getenv("AI_SESSION_DB") or default_path)
         if self.db_path != ":memory:":
@@ -78,6 +79,17 @@ class ConversationStore:
         self._connection = sqlite3.connect(self.db_path, check_same_thread=False)
         self._connection.row_factory = sqlite3.Row
         self._lock = RLock()
+        self._long_term_store = ChromaVectorStore(
+            collection_name="ai-long-term-memory",
+            embeddings=self.embeddings,
+            persist_directory=os.getenv("CHROMA_PERSIST_DIRECTORY"),
+        )
+        self._summary_store = ChromaVectorStore(
+            collection_name="ai-memory-summaries",
+            embeddings=self.embeddings,
+            persist_directory=os.getenv("CHROMA_PERSIST_DIRECTORY"),
+        )
+        self._memory_index_signature: tuple[str, ...] = ()
         self._initialize()
 
     def _initialize(self) -> None:
@@ -234,11 +246,14 @@ class ConversationStore:
 
         query_vector = self.embeddings.embed_query(query or "训练计划 用户画像 健身建议")
         planning_query = bool(re.search(r"计划|推荐|训练|动作|安排|减脂|增肌|plan|recommend|workout", query, re.I))
+        semantic_scores = self._semantic_memory_scores(rows, user_id, query or "训练计划 用户画像 健身建议")
         ranked = []
         for row in rows:
             item = self._memory_row(row)
-            vector = self._loads_vector(row["embedding_json"])
-            similarity = self._cosine(query_vector, vector)
+            similarity = semantic_scores.get(str(row["id"]))
+            if similarity is None:
+                vector = self.embeddings.embed_query(f"{item['category']}：{item['content']}")
+                similarity = self._cosine(query_vector, vector)
             category = item["category"]
             boost = {
                 "body_issue": 0.35,
@@ -254,6 +269,42 @@ class ConversationStore:
         ranked.sort(key=lambda pair: pair[0], reverse=True)
         limit = max(1, int(top_k or self.long_term_top_k))
         return [{**item, "score": round(score, 4)} for score, item in ranked[:limit]]
+
+    def _semantic_memory_scores(
+        self,
+        rows: list[sqlite3.Row],
+        user_id: int,
+        query: str,
+    ) -> dict[str, float]:
+        try:
+            signature = tuple(sorted(str(row["id"]) for row in rows))
+            if signature != self._memory_index_signature:
+                self._long_term_store.upsert(
+                    ids=[f"memory-{row['id']}" for row in rows],
+                    documents=[f"{row['category']}：{row['content']}" for row in rows],
+                    metadatas=[
+                        {
+                            "memory_id": str(row["id"]),
+                            "user_id": int(row["user_id"]),
+                            "category": str(row["category"]),
+                            "source": "long_term_memory",
+                        }
+                        for row in rows
+                    ],
+                )
+                self._memory_index_signature = signature
+            hits = self._long_term_store.query(
+                query,
+                n_results=min(max(1, self.long_term_top_k), len(rows)),
+                where={"user_id": int(user_id)},
+            )
+            return {
+                str((hit.get("metadata") or {}).get("memory_id")): self._distance_to_similarity(hit.get("distance"))
+                for hit in hits
+                if (hit.get("metadata") or {}).get("memory_id")
+            }
+        except Exception:
+            return {}
 
     def latest_summaries(self, user_id: int, session_id: str | None = None, limit: int = 2) -> list[dict]:
         params: list[Any] = [int(user_id)]
@@ -365,6 +416,27 @@ class ConversationStore:
                 """,
                 (memory_id, int(user_id), category, content, session_id, importance, payload, now, now),
             )
+            row = self._connection.execute(
+                "SELECT id FROM ai_long_term_memories WHERE user_id = ? AND category = ? AND content = ?",
+                (int(user_id), category, content),
+            ).fetchone()
+        persisted_id = str(row["id"] if row else memory_id)
+        try:
+            self._long_term_store.upsert(
+                ids=[f"memory-{persisted_id}"],
+                documents=[f"{category}：{content}"],
+                metadatas=[
+                    {
+                        "memory_id": persisted_id,
+                        "user_id": int(user_id),
+                        "category": category,
+                        "source": "long_term_memory",
+                    }
+                ],
+            )
+            self._memory_index_signature = ()
+        except Exception:
+            pass
         return {"category": category, "content": content, "importance": importance}
 
     def maybe_update_summary(
@@ -473,6 +545,20 @@ class ConversationStore:
                     now,
                 ),
             )
+        try:
+            self._summary_store.upsert(
+                ids=[f"summary-{session.user_id}-{session.id}"],
+                documents=[summary[:1000]],
+                metadatas=[
+                    {
+                        "user_id": int(session.user_id),
+                        "session_id": str(session.id),
+                        "source": "memory_summary",
+                    }
+                ],
+            )
+        except Exception:
+            pass
 
     def _parse_memory_items(self, raw: str) -> list[dict]:
         text = str(raw or "").strip()
@@ -613,3 +699,9 @@ class ConversationStore:
             return 0.0
         size = min(len(left), len(right))
         return sum(left[index] * right[index] for index in range(size))
+
+    def _distance_to_similarity(self, distance: Any) -> float:
+        try:
+            return max(0.0, min(1.0, 1.0 - float(distance)))
+        except (TypeError, ValueError):
+            return 0.0
