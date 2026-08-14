@@ -8,14 +8,13 @@
 不改动其 llm_client.py / tools.py / agents.py。
 """
 
-from __future__ import annotations
-
 import json
 import logging
 from functools import wraps
 from typing import Any, Callable, Literal
 
 from langgraph.graph import END, START, StateGraph
+from langchain_core.runnables import RunnableConfig
 
 from app.ai.state import AgentState
 from app.llm.client import LLMClient, LLMConfigurationError
@@ -57,9 +56,9 @@ def _safe_step(name: str, fn: Callable | None = None):
 
     def decorator(func: Callable[[AgentState], dict[str, Any]]):
         @wraps(func)
-        def wrapped(state: AgentState) -> dict[str, Any]:
+        def wrapped(state: AgentState, config: RunnableConfig | None = None) -> dict[str, Any]:
             try:
-                update = dict(func(state))
+                update = dict(func(state, config))
                 update.setdefault("error", {})
                 update.setdefault("failed_step", "")
                 update.setdefault("retryable", False)
@@ -181,7 +180,7 @@ def _classify_request(message: str) -> BusinessRoute:
 
 
 @_safe_step("planning_agent")
-def planning_agent(state: AgentState) -> dict[str, Any]:
+def planning_agent(state: AgentState, config: RunnableConfig | None = None) -> dict[str, Any]:
     messages = state.get("messages") or []
     user_message = ""
     for m in reversed(messages):
@@ -233,7 +232,7 @@ def _last_user_message(state: AgentState) -> str:
     return ""
 
 
-def graphrag_node(state: AgentState) -> dict[str, Any]:
+def graphrag_node(state: AgentState, config: RunnableConfig | None = None) -> dict[str, Any]:
     """把 GraphRAG 公开返回写入 State；图服务不可用时安全降级。"""
     question = _last_user_message(state)
     user_id = (state.get("user_info") or {}).get("id")
@@ -309,7 +308,7 @@ def _build_recommend_question(plan: dict[str, Any], evaluation: dict[str, Any]) 
 
 
 @_safe_step("recommend_agent")
-def recommend_agent(state: AgentState) -> dict[str, Any]:
+def recommend_agent(state: AgentState, config: RunnableConfig | None = None) -> dict[str, Any]:
     user_info = state.get("user_info") or {}
     plan = state.get("task_plan") or {}
     evaluation = state.get("evaluation") or {}
@@ -419,7 +418,7 @@ def _heuristic_evaluate(user_info: dict[str, Any], plan: dict[str, Any], recs: l
 
 
 @_safe_step("evaluate_agent")
-def evaluate_agent(state: AgentState) -> dict[str, Any]:
+def evaluate_agent(state: AgentState, config: RunnableConfig | None = None) -> dict[str, Any]:
     user_info = state.get("user_info") or {}
     plan = state.get("task_plan") or {}
     recs = state.get("recommendations") or []
@@ -479,7 +478,7 @@ def _motivate_via_llm(user_info: dict[str, Any], evaluation: dict[str, Any]) -> 
 
 
 @_safe_step("motivate_agent")
-def motivate_agent(state: AgentState) -> dict[str, Any]:
+def motivate_agent(state: AgentState, config: RunnableConfig | None = None) -> dict[str, Any]:
     user_info = state.get("user_info") or {}
     evaluation = state.get("evaluation") or {}
     nickname = user_info.get("nickname") or user_info.get("username") or "朋友"
@@ -520,7 +519,7 @@ def _report_via_llm(state_data: dict[str, Any]) -> dict[str, Any] | None:
 
 
 @_safe_step("report_agent")
-def report_agent(state: AgentState) -> dict[str, Any]:
+def report_agent(state: AgentState, config: RunnableConfig | None = None) -> dict[str, Any]:
     plan = state.get("task_plan") or {}
     recs = state.get("recommendations") or []
     evaluation = state.get("evaluation") or {}
@@ -558,7 +557,7 @@ def report_agent(state: AgentState) -> dict[str, Any]:
 # 错误处理节点
 # ============================================================
 
-def error_handler(state: AgentState) -> dict[str, Any]:
+def error_handler(state: AgentState, config: RunnableConfig | None = None) -> dict[str, Any]:
     failed_step = str(state.get("failed_step") or "")
     retry_count = int(state.get("retry_count") or 0)
     max_retries = int(state.get("max_retries", MAX_RETRY))
@@ -588,7 +587,7 @@ def error_handler(state: AgentState) -> dict[str, Any]:
     }
 
 
-def fallback_node(state: AgentState) -> dict[str, Any]:
+def fallback_node(state: AgentState, config: RunnableConfig | None = None) -> dict[str, Any]:
     reason = state.get("fallback_reason") or "unsupported_intent"
     return {
         "report": {
