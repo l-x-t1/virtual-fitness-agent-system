@@ -15,8 +15,8 @@ import asyncio
 from types import SimpleNamespace
 from unittest.mock import patch
 
-from app.ai.agent_coordinator import AgentCoordinator
 from app.ai.langgraph_agent import run_agent
+from agents import AgentCoordinator
 
 
 class FakeRecommendAgent:

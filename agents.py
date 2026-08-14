@@ -411,6 +411,33 @@ class AgentCoordinator:
         self.game = GameAgent()
         self.report = ReportAgent()
 
+    # ---- 工具绑定（复用 LLMClient.bind_tools，人员4） ----
+
+    def recommend_tools(self) -> list[Any]:
+        """推荐 Agent 暴露的工具：recommend_exercises / recommend_venues。"""
+        return self.recommendation.tools()
+
+    def bound_recommend_llm(self):
+        """把推荐工具绑定到推荐 Agent 的 LLMClient（Function Calling 用）。"""
+        return self.recommendation.llm_client.bind_tools(self.recommend_tools())
+
+    def recommend_with_tools(
+        self,
+        user: dict[str, Any],
+        exercise_name: str | None = None,
+        question: str | None = None,
+    ) -> dict[str, Any]:
+        """通过 LLM 的 Function Calling 触发 recommend_exercises 工具完成推荐。"""
+        return self.recommendation.recommend_with_tools(
+            user, exercise_name=exercise_name, question=question
+        )
+
+    async def run_workflow(self, user_message: str, user_id: int | str) -> dict[str, Any]:
+        """运行规划→推荐→评估→激励→报告 完整 LangGraph 链路。"""
+        from app.ai.langgraph_agent import run_agent
+
+        return await run_agent(user_message, user_id)
+
     def dashboard(self, user):
         return cache_get_or_set(cache_keys.dashboard(user["id"]), lambda: self._dashboard(user))
 
