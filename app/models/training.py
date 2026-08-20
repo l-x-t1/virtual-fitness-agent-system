@@ -1,3 +1,5 @@
+from typing import Any
+
 from pydantic import BaseModel, Field
 
 
@@ -15,3 +17,5 @@ class PoseRecordSubmit(BaseModel):
     hip_angle: float | None = None
     shoulder_balance: float | None = None
     raw_landmarks_json: str = "{}"
+    landmarks: list[dict[str, Any]] | None = Field(default=None, max_length=33)
+    raw_score: float | None = Field(default=None, ge=0, le=100)

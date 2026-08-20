@@ -269,6 +269,22 @@ class FitnessService:
             exercise = next((item for item in repo.exercises() if item["id"] == exercise_id), None)
         return {"exercise": exercise}
 
+    def delete_admin_exercise(self, body):
+        admin = self.current_admin(body=body)
+        if not admin:
+            return {"error": "需要管理员权限"}
+        if body.get("confirm") is not True:
+            return {"error": "删除动作需要 confirm=true"}
+        exercise_id = body.get("id")
+        if not exercise_id:
+            return {"error": "缺少动作 ID"}
+        with session_scope() as session:
+            repo = FitnessRepository(session)
+            deleted = repo.delete_exercise(int(exercise_id))
+            if deleted:
+                repo.save_admin_log(admin["id"], "删除课程", str(exercise_id))
+        return {"deleted": deleted, "id": int(exercise_id)} if deleted else {"error": "动作不存在"}
+
     def save_admin_role(self, body):
         admin = self.current_admin(body=body)
         if not admin:

@@ -25,6 +25,7 @@ class AgentState(TypedDict, total=False):
       next_step:       兼容旧调用方的下一节点名称
       route:           conditional_edges 使用的显式路由值
       graph_context:   GraphRAG 只读检索结果或不可用状态
+      tool_results:    环境、姿态或动作库工具的结构化执行结果
       retry_count:     当前重试次数
       max_retries:     最大重试次数
       error:           结构化错误信息
@@ -44,6 +45,7 @@ class AgentState(TypedDict, total=False):
     motivation: str
     report: dict[str, Any]
     graph_context: dict[str, Any]
+    tool_results: list[dict[str, Any]]
     current_step: str
     next_step: str
     route: str

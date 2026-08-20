@@ -421,6 +421,29 @@ class AgentCoordinator:
         """把推荐工具绑定到推荐 Agent 的 LLMClient（Function Calling 用）。"""
         return self.recommendation.llm_client.bind_tools(self.recommend_tools())
 
+    def fitness_tool_registry(self, actor: dict[str, Any] | None = None):
+        """Build an isolated registry for environment, pose, and exercise tools."""
+        from app.tools import build_fitness_tool_registry
+
+        return build_fitness_tool_registry(actor=actor)
+
+    def fitness_tools(self, actor: dict[str, Any] | None = None) -> list[Any]:
+        return self.fitness_tool_registry(actor).specs()
+
+    def bound_fitness_llm(self, actor: dict[str, Any] | None = None):
+        return self.recommendation.llm_client.bind_tools(self.fitness_tools(actor))
+
+    def run_tool_agent(
+        self,
+        question: str,
+        actor: dict[str, Any] | None = None,
+        context: dict[str, Any] | None = None,
+    ) -> dict[str, Any]:
+        from app.tools import FitnessToolAgent
+
+        registry = self.fitness_tool_registry(actor)
+        return FitnessToolAgent(registry, self.recommendation.llm_client).run(question, context)
+
     def recommend_with_tools(
         self,
         user: dict[str, Any],

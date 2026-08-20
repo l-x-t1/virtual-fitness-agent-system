@@ -23,7 +23,7 @@ logger = logging.getLogger(__name__)
 
 MAX_RETRY = 2  # 兼容旧常量名；State 中可通过 max_retries 覆盖
 
-BusinessRoute = Literal["recommend", "evaluate", "motivate", "report", "graphrag", "fallback"]
+BusinessRoute = Literal["recommend", "evaluate", "motivate", "report", "graphrag", "tools", "fallback"]
 
 
 # ============================================================
@@ -160,6 +160,13 @@ def _extract_constraints(user_info: dict[str, Any], message: str) -> list[str]:
 def _classify_request(message: str) -> BusinessRoute:
     """确定性意图路由；只决定下一节点，不执行业务逻辑。"""
     text = (message or "").strip()
+    if (
+        ("天气" in text and any(k in text for k in ("查", "查询", "怎么样", "如何", "适合", "能不能", "可以")))
+        or any(k in text for k in ("场馆", "健身房", "哪里练", "运动场"))
+        or any(k in text for k in ("MediaPipe", "mediapipe", "关键点"))
+        or any(k in text for k in ("动作库", "动作列表", "新增动作", "修改动作", "删除动作"))
+    ):
+        return "tools"
     if any(k in text for k in ("报告", "周报", "月报", "总结", "复盘")):
         return "report"
     if any(k in text for k in ("鼓励", "激励", "没动力", "坚持不下去", "打气")):
@@ -205,6 +212,7 @@ def planning_agent(state: AgentState, config: RunnableConfig | None = None) -> d
         "motivate": "motivate_agent",
         "report": "report_agent",
         "graphrag": "graphrag_node",
+        "tools": "tool_agent",
         "fallback": "fallback_node",
     }
     return {
@@ -212,6 +220,39 @@ def planning_agent(state: AgentState, config: RunnableConfig | None = None) -> d
         "current_step": "planned",
         "next_step": node_by_route[route],
         "route": route,
+    }
+
+
+# ============================================================
+# 统一工具 Agent（天气 / 场馆 / MediaPipe / 动作库）
+# ============================================================
+
+@_safe_step("tool_agent")
+def tool_agent(state: AgentState, config: RunnableConfig | None = None) -> dict[str, Any]:
+    from app.tools import FitnessToolAgent, build_fitness_tool_registry
+
+    question = _last_user_message(state)
+    user_info = state.get("user_info") or {}
+    context = {
+        "location": user_info.get("location"),
+        "preference": user_info.get("preference"),
+        "exercise_name": user_info.get("exercise_name"),
+        "landmarks": user_info.get("landmarks") or [],
+        "raw_score": user_info.get("raw_score"),
+    }
+    registry = build_fitness_tool_registry(actor=user_info)
+    result = FitnessToolAgent(registry, _make_llm()).run(question, context)
+    return {
+        "tool_results": result.get("tool_results") or [],
+        "messages": [{
+            "role": "assistant",
+            "content": result.get("answer") or "工具处理完成。",
+            "agent": "tool_agent",
+        }],
+        "current_step": "reporting",
+        "next_step": "report_agent",
+        "route": "report",
+        "fallback_reason": result.get("fallback_reason") or "",
     }
 
 
@@ -525,6 +566,7 @@ def report_agent(state: AgentState, config: RunnableConfig | None = None) -> dic
     evaluation = state.get("evaluation") or {}
     motivation = state.get("motivation") or ""
     graph_context = state.get("graph_context") or {}
+    tool_results = state.get("tool_results") or []
 
     state_snapshot = {
         "task_plan": plan,
@@ -532,14 +574,23 @@ def report_agent(state: AgentState, config: RunnableConfig | None = None) -> dic
         "evaluation": evaluation,
         "motivation": motivation,
         "graph_context": graph_context,
+        "tool_results": tool_results,
     }
     report = _report_via_llm(state_snapshot)
     if not report:
         graph_answer = str(graph_context.get("answer") or "").strip()
+        tool_answer = next(
+            (
+                str(item.get("content") or "")
+                for item in reversed(state.get("messages") or [])
+                if item.get("agent") == "tool_agent"
+            ),
+            "",
+        )
         goal = plan.get("goal", "综合训练")
         names = [item.get("name", "") for item in recs[:5]]
         report = {
-            "summary": graph_answer or f"已为你的「{goal}」目标生成训练方案，共推荐 {len(names)} 个动作。",
+            "summary": tool_answer or graph_answer or f"已为你的「{goal}」目标生成训练方案，共推荐 {len(names)} 个动作。",
             "plan": [f"动作：{name}" for name in names] or ["请补充画像后重新推荐"],
             "expected": "坚持执行并记录表现，2-4 周可观察到改善。",
             "motivation": motivation,
@@ -612,10 +663,14 @@ def fallback_node(state: AgentState, config: RunnableConfig | None = None) -> di
 
 def planning_router(state: AgentState) -> str:
     route = state.get("route") or "fallback"
-    return route if route in {"recommend", "evaluate", "motivate", "report", "graphrag", "fallback"} else "fallback"
+    return route if route in {"recommend", "evaluate", "motivate", "report", "graphrag", "tools", "fallback"} else "fallback"
 
 
 def graph_router(state: AgentState) -> str:
+    return "error" if state.get("error") else "report"
+
+
+def tool_router(state: AgentState) -> str:
     return "error" if state.get("error") else "report"
 
 
@@ -652,6 +707,7 @@ def build_graph():
 
     graph.add_node("planning_agent", planning_agent)
     graph.add_node("graphrag_node", graphrag_node)
+    graph.add_node("tool_agent", tool_agent)
     graph.add_node("recommend_agent", recommend_agent)
     graph.add_node("evaluate_agent", evaluate_agent)
     graph.add_node("motivate_agent", motivate_agent)
@@ -664,9 +720,12 @@ def build_graph():
     graph.add_conditional_edges("planning_agent", planning_router, {
         "recommend": "recommend_agent", "evaluate": "evaluate_agent",
         "motivate": "motivate_agent", "report": "report_agent",
-        "graphrag": "graphrag_node", "fallback": "fallback_node",
+        "graphrag": "graphrag_node", "tools": "tool_agent", "fallback": "fallback_node",
     })
     graph.add_conditional_edges("graphrag_node", graph_router, {
+        "report": "report_agent", "error": "error_handler",
+    })
+    graph.add_conditional_edges("tool_agent", tool_router, {
         "report": "report_agent", "error": "error_handler",
     })
     graph.add_conditional_edges("recommend_agent", recommend_router, {
@@ -722,6 +781,7 @@ async def run_agent(user_message: str, user_id: int | str) -> dict[str, Any]:
         "motivation": "",
         "report": {},
         "graph_context": {},
+        "tool_results": [],
         "current_step": "planning",
         "next_step": "planning_agent",
         "route": "planning",

@@ -73,5 +73,8 @@ class AdminService:
     def save_exercise(self, data: dict):
         return self.operations.save_admin_exercise(data)
 
+    def delete_exercise(self, item_id: int, confirm: bool = False):
+        return self.operations.delete_admin_exercise({"id": item_id, "confirm": confirm})
+
     def save_role(self, data: dict):
         return self.operations.save_admin_role(data)
