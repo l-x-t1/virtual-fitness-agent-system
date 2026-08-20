@@ -1,0 +1,27 @@
+#!/bin/sh
+set -eu
+
+changed_files="$(git diff --cached --name-only --diff-filter=ACMR || true)"
+
+case_changed=0
+for pattern in \
+  "app/agents/" \
+  "app/agents/prompts/" \
+  "app/ai/prompts.py" \
+  "app/ai/rag/" \
+  "app/ai/langgraph_agent.py" \
+  "app/graphrag/" \
+  "app/llm/" \
+  "app/evaluation/" \
+  "tools/run_agent_regression.py" \
+  "tools/data_seed/agent_eval_cases.json"
+do
+  echo "$changed_files" | grep -q "$pattern" && case_changed=1 && break || true
+done
+
+if [ "$case_changed" -eq 0 ]; then
+  exit 0
+fi
+
+echo "Running agent regression before commit..."
+python tools/run_agent_regression.py run --enforce --report .agent_eval/latest_report.json
