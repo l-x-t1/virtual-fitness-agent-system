@@ -138,6 +138,16 @@ async def save_exercise(body: ExerciseSave, request: Request, admin=Depends(requ
     return await invoke(request, admin, "save_exercise", body.model_dump(exclude_none=True))
 
 
+@router.delete("/exercise/{item_id}")
+async def delete_exercise(
+    item_id: int,
+    request: Request,
+    confirm: bool = Query(default=False),
+    admin=Depends(require_admin),
+):
+    return await invoke(request, admin, "delete_exercise", item_id, confirm)
+
+
 @router.get("/roles")
 async def roles(request: Request, admin=Depends(require_admin)):
     return await invoke(request, admin, "roles")

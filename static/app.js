@@ -1560,12 +1560,15 @@ async function submitSession() {
     score,
     duration: $("durationInput").value,
   });
-  persistPoseSnapshot();
+  const poseEvaluation = await persistPoseSnapshot();
   $("startGameBtn").textContent = "重新开始";
   $("startGameBtn").classList.remove("is-running");
   $("gameResult").innerHTML = `
     <strong>${data.score} 分，获得 ${data.game.points} 积分</strong>
     <p>${data.feedback}</p>
+    ${poseEvaluation?.evaluation?.suggestions?.length
+      ? `<p>姿态纠错：${poseEvaluation.evaluation.suggestions.join("；")}</p>`
+      : ""}
     <span>${data.game.unlocked.length ? `解锁：${data.game.unlocked.join("、")}` : "继续训练可解锁新关卡"}</span>
   `;
   state.user.points = data.game.total_points;
@@ -1577,18 +1580,32 @@ async function submitSession() {
 async function persistPoseSnapshot() {
   if (!state.user) return;
   try {
-    await fitnessApi.recordPose({
+    const landmarks = state.modelReady && Array.isArray(state.latestLandmarks)
+      ? state.latestLandmarks.map((point) => ({
+          x: Number(point.x),
+          y: Number(point.y),
+          z: Number(point.z || 0),
+          visibility: Number(point.visibility ?? 1),
+        }))
+      : [];
+    return await fitnessApi.recordPose({
       user_id: state.user.id,
       exercise_name: state.selectedExercise || $("exerciseSelect").value,
       confidence: Number(($("poseConfidence").textContent || "0").replace("%", "")),
       stability_score: Number($("stabilityScore").textContent || 0),
       knee_angle: null,
       hip_angle: null,
-      shoulder_balance: Number($("stabilityScore").textContent || 0),
-      raw_landmarks_json: JSON.stringify({ source: state.modelReady ? "mediapipe" : "keyboard", score: state.poseScore }),
+      shoulder_balance: null,
+      raw_score: Number(state.poseScore || 0),
+      landmarks,
+      raw_landmarks_json: JSON.stringify({
+        source: landmarks.length ? "mediapipe" : "keyboard",
+        score: state.poseScore,
+      }),
     });
   } catch (error) {
     console.warn("pose record skipped", error);
+    return null;
   }
 }
 

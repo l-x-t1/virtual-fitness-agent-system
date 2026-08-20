@@ -368,6 +368,15 @@ class FitnessRepository:
         cache_delete(*cache_keys.CATALOG_KEYS)
         return item.id
 
+    def delete_exercise(self, exercise_id: int) -> bool:
+        item = self.session.get(Exercise, int(exercise_id))
+        if not item:
+            return False
+        self.session.delete(item)
+        self.session.flush()
+        cache_delete(*cache_keys.CATALOG_KEYS, cache_keys.ADMIN_OVERVIEW)
+        return True
+
     def save_equipment(self, data: dict) -> int:
         item = self.session.get(FitnessEquipment, int(data["id"])) if data.get("id") else None
         fields = ("name", "category", "venue_id", "location", "latitude", "longitude", "is_smart", "status", "manufacturer", "crowd_index", "daily_uses", "last_maintenance", "description")
