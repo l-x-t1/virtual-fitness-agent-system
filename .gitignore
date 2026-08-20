@@ -8,6 +8,7 @@ app/ai/data/*.db-shm
 app/ai/data/fitness_knowledge_custom.json
 *.pyc
 .env
+.agent_eval/
 fitness.db
 .pytest-tmp/
 server.log

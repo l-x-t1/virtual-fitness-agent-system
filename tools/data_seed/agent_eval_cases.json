@@ -1,0 +1,144 @@
+{
+  "cases": [
+    {
+      "id": "chat_knee_low_impact",
+      "entrypoint": "chat",
+      "question": "我的膝盖有点不适，想重新开始练，怎么安排？",
+      "expected_answer": "先从低冲击、无痛范围开始，优先保护膝盖，必要时寻求专业评估。",
+      "expected_citations": ["膝盖不适", "低冲击", "保护关节"],
+      "input": {
+        "user_id": 1,
+        "memory_notes": ["膝盖偶尔不适", "偏好低冲击训练"],
+        "recent_messages": [
+          {"role": "user", "content": "我的膝盖有点不适，想重新开始练，怎么安排？"}
+        ],
+        "top_k": 4
+      },
+      "tags": ["safety", "low_impact", "chat"]
+    },
+    {
+      "id": "chat_beginner_frequency",
+      "entrypoint": "chat",
+      "question": "我是新手，一周练几次比较合适？",
+      "expected_answer": "新手建议每周2到3次，隔天恢复，再根据状态逐步增加。",
+      "expected_citations": ["新手", "一周三练", "隔天恢复"],
+      "input": {
+        "user_id": 2,
+        "memory_notes": ["刚开始训练", "想循序渐进"],
+        "recent_messages": [
+          {"role": "user", "content": "我是新手，一周练几次比较合适？"}
+        ],
+        "top_k": 4
+      },
+      "tags": ["planning", "frequency", "chat"]
+    },
+    {
+      "id": "chat_recovery_guidance",
+      "entrypoint": "chat",
+      "question": "训练后很酸，怎么恢复更稳妥？",
+      "expected_answer": "训练后优先保证睡眠、补水和轻活动恢复。",
+      "expected_citations": ["恢复", "睡眠", "补水"],
+      "input": {
+        "user_id": 3,
+        "memory_notes": ["最近训练量增加", "训练后容易酸痛"],
+        "recent_messages": [
+          {"role": "user", "content": "训练后很酸，怎么恢复更稳妥？"}
+        ],
+        "top_k": 4
+      },
+      "tags": ["recovery", "chat"]
+    },
+    {
+      "id": "profile_summary_basic",
+      "entrypoint": "profile",
+      "question": "请总结一下我的训练画像",
+      "expected_answer": "beginner 低冲击 膝盖偶尔不适",
+      "input": {
+        "user": {
+          "nickname": "小林",
+          "fitness_level": "beginner",
+          "goals": ["提升核心稳定"],
+          "preference": "低冲击",
+          "injuries": "膝盖偶尔不适"
+        },
+        "history": [
+          {"exercise_name": "深蹲", "score": 70, "duration": 20},
+          {"exercise_name": "平板支撑", "score": 90, "duration": 25}
+        ],
+        "behavior": ["每周两次训练"]
+      },
+      "tags": ["profile", "structured"]
+    },
+    {
+      "id": "recommend_low_impact_actions",
+      "entrypoint": "recommend",
+      "question": "帮我推荐更适合膝盖不舒服的新手动作",
+      "expected_answer": "平板支撑",
+      "input": {
+        "user": {
+          "nickname": "小林",
+          "fitness_level": "beginner",
+          "goals": ["提升核心稳定"],
+          "preference": "低冲击",
+          "injuries": "膝盖偶尔不适"
+        },
+        "knowledge_base": [
+          {
+            "name": "平板支撑",
+            "category": "核心训练",
+            "difficulty": 1,
+            "target": "核心稳定",
+            "equipment": "瑜伽垫"
+          },
+          {
+            "name": "开合跳",
+            "category": "有氧训练",
+            "difficulty": 2,
+            "target": "心肺耐力",
+            "equipment": "徒手"
+          },
+          {
+            "name": "椅子辅助深蹲",
+            "category": "下肢训练",
+            "difficulty": 1,
+            "target": "基础下肢力量",
+            "equipment": "椅子"
+          }
+        ],
+        "history": [],
+        "top_k": 3
+      },
+      "tags": ["recommend", "retrieval", "agent"]
+    },
+    {
+      "id": "evaluate_missing_pose_keypoints",
+      "entrypoint": "evaluate",
+      "question": "帮我评估这个深蹲动作",
+      "expected_answer": "补充完整且可见的 MediaPipe 关键点后再进行姿态纠错",
+      "input": {
+        "exercise_name": "深蹲",
+        "raw_score": 75,
+        "pose_data": null
+      },
+      "tags": ["evaluate", "motion"]
+    },
+    {
+      "id": "report_weekly_summary",
+      "entrypoint": "report",
+      "question": "帮我生成本周训练报告",
+      "expected_answer": "两次训练 平均80 总时长45",
+      "input": {
+        "report_type": "weekly",
+        "training_records": [
+          {"exercise_name": "深蹲", "score": 70, "duration": 20, "created_at": "2026-08-10T08:00:00+08:00"},
+          {"exercise_name": "平板支撑", "score": 90, "duration": 25, "created_at": "2026-08-12T08:00:00+08:00"}
+        ],
+        "profile": {
+          "nickname": "小林",
+          "fitness_level": "beginner"
+        }
+      },
+      "tags": ["report", "weekly"]
+    }
+  ]
+}
