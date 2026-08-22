@@ -97,4 +97,9 @@ class SlotExtractor:
 
     def _normalize(self, payload: dict[str, Any]) -> dict[str, Any]:
         state = SlotState(**payload)
-        return state.model_dump(exclude_none=True)
+        normalized = state.model_dump(mode="json", exclude_none=True)
+        return {
+            key: normalized[key]
+            for key in SlotState.slot_names()
+            if key in normalized and normalized[key] not in (None, [], "")
+        }

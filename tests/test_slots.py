@@ -44,6 +44,8 @@ def test_extractor_rule_fallback():
     assert payload["equipment"] == "徒手"
     assert payload["time"] == "晚上"
     assert payload["location"] == "家里"
+    assert "updated_at" not in payload
+    assert "missing_required" not in payload
 
 
 def test_validator_basic():
@@ -51,6 +53,17 @@ def test_validator_basic():
     result = validator.validate(SlotState(goal="康复", injuries=["腰"], equipment="徒手"))
     assert result.valid
     assert not result.errors
+
+
+def test_validator_replaces_knee_conflict():
+    validator = SlotValidator()
+    state = SlotState(goal="减脂", injuries=["膝"])
+    result = validator.resolve_exercises(
+        [{"name": "深蹲", "equipment": "徒手", "target": "下肢"}],
+        state,
+    )
+    assert result[0]["name"] != "深蹲"
+    assert result[0]["replacement_of"] == "深蹲"
 
 
 def test_clarifier_limits():
@@ -78,4 +91,3 @@ def test_archiver_writes_only_delta():
     curr = SlotState(goal="减脂", injuries=["膝", "腰"], equipment="哑铃", time="晚上")
     result = archiver.archive(user_id=1, session_id="s1", previous=prev, current=curr)
     assert len(result.saved) == 3
-
