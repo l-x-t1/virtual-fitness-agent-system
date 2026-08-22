@@ -64,7 +64,7 @@ def _run(message: str, user_id: int = 1) -> dict:
 # ============================================================
 
 def test_full_flow_scenario1_fat_loss():
-    result = _run("我要减脂，膝盖不好")
+    result = _run("帮我制定减脂训练计划，膝盖不好，徒手")
 
     # 规划
     assert result["task_plan"]["goal"] == "减脂"
@@ -95,7 +95,7 @@ def test_full_flow_scenario1_fat_loss():
 # ============================================================
 
 def test_full_flow_scenario2_retry():
-    result = _run("帮我制定练胸计划")
+    result = _run("帮我推荐练胸动作，增肌")
 
     assert result["task_plan"]["goal"] == "增肌"
     assert result["retry_count"] >= 1          # 发生过回退重推
@@ -114,7 +114,7 @@ def test_full_flow_scenario2_retry():
 def test_coordinator_run_workflow():
     with patch("agents.RecommendAgent", FakeRecommendAgent):
         coord = AgentCoordinator()
-        result = asyncio.run(coord.run_workflow("我要减脂，膝盖不好", 1))
+        result = asyncio.run(coord.run_workflow("帮我制定减脂训练计划，膝盖不好，徒手", 1))
 
     assert result["task_plan"]["goal"] == "减脂"
     assert result["recommendations"]

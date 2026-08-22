@@ -25,11 +25,12 @@ class SlotExtractor:
     def _build_prompt(self, message: str, history: list[dict[str, Any]], state: SlotState) -> str:
         return (
             "你是健身对话槽位抽取器。只返回 JSON。"
-            '格式：{"goal": "...", "injuries": ["..."], "equipment": "...", "time": "...", "location": "...", "missing": ["..."]}\n'
+            '格式：{"goal": "...", "target_body_part": "...", "injuries": ["..."], "equipment": "...", "time": "...", "location": "...", "missing": ["..."]}\n'
             f"已有槽位：{json.dumps(state.model_dump(mode='json'), ensure_ascii=False)}\n"
             f"历史消息：{json.dumps(history[-8:], ensure_ascii=False)}\n"
             f"当前用户消息：{message}\n"
-            "槽位候选值：goal=减脂/增肌/塑形/康复/综合；injuries=膝/踝/腰/肩/腕/无；equipment=徒手/弹力带/哑铃/健身房器械；time=早上/午间/晚上；location=家里/健身房/户外。"
+            "槽位候选值：goal=减脂/增肌/塑形/康复/综合；target_body_part=胸/背/腿/臀/肩/手臂/核心/全身；"
+            "injuries=膝/踝/腰/肩/腕/无；equipment=徒手/弹力带/哑铃/健身房器械；time=早上/午间/晚上；location=家里/健身房/户外。"
         )
 
     def _llm_extract(self, prompt: str) -> dict[str, Any] | None:
@@ -73,6 +74,22 @@ class SlotExtractor:
             payload.setdefault("injuries", []).append("腕")
         if re.search(r"无伤病|没有伤|无问题|没问题", text, re.I):
             payload["injuries"] = ["无"]
+        if re.search(r"胸|胸部|chest", text, re.I):
+            payload["target_body_part"] = "胸"
+        elif re.search(r"背|背部|back", text, re.I):
+            payload["target_body_part"] = "背"
+        elif re.search(r"腿|腿部|下肢|leg", text, re.I):
+            payload["target_body_part"] = "腿"
+        elif re.search(r"臀|臀部|glute", text, re.I):
+            payload["target_body_part"] = "臀"
+        elif re.search(r"肩|肩部|shoulder", text, re.I):
+            payload["target_body_part"] = "肩"
+        elif re.search(r"手臂|胳膊|arm", text, re.I):
+            payload["target_body_part"] = "手臂"
+        elif re.search(r"核心|腹|腹部|core", text, re.I):
+            payload["target_body_part"] = "核心"
+        elif re.search(r"全身|全身性|full body", text, re.I):
+            payload["target_body_part"] = "全身"
         if re.search(r"徒手|无器材|没器材|bodyweight", text, re.I):
             payload["equipment"] = "徒手"
         elif re.search(r"弹力带", text, re.I):

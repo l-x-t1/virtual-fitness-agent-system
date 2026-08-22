@@ -198,10 +198,16 @@ class AIStreamOrchestrator:
                 "report": {},
                 "current_step": "planning",
                 "next_step": "planning_agent",
+                "route": "planning",
+                "control_route": "classification",
                 "retry_count": 0,
                 "error": "",
                 "session_id": prepared["session"].id,
-                "slot_state": prepared.get("slot_state") or {},
+                "slot_state": (
+                    prepared["slot_state"].model_dump(mode="json")
+                    if hasattr(prepared.get("slot_state"), "model_dump")
+                    else prepared.get("slot_state") or {}
+                ),
                 "slots_delta": prepared.get("slots_delta") or {},
                 "slot_status": prepared.get("slot_status") or "complete",
             }

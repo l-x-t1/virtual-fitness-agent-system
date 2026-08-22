@@ -18,15 +18,26 @@ class ValidationResult:
 
 
 class SlotValidator:
-    def validate(self, state: SlotState) -> ValidationResult:
+    def validate(self, state: SlotState, required_slots: list[str] | tuple[str, ...] | None = None) -> ValidationResult:
         normalized = SlotState(**state.model_dump())
         errors: list[str] = []
-        if normalized.goal is None:
+        required = tuple(required_slots) if required_slots is not None else SlotState.required_keys()
+        if "goal" in required and normalized.goal is None:
             errors.append("goal_missing")
-        if not normalized.injuries:
+        if "target_body_part" in required and normalized.target_body_part is None:
+            errors.append("target_body_part_missing")
+        if "injuries" in required and not normalized.injuries:
             errors.append("injuries_missing")
+        if "equipment" in required and normalized.equipment is None:
+            errors.append("equipment_missing")
+        if "time" in required and normalized.time is None:
+            errors.append("time_missing")
+        if "location" in required and normalized.location is None:
+            errors.append("location_missing")
         if normalized.goal and normalized.goal not in {"减脂", "增肌", "塑形", "康复", "综合"}:
             errors.append("goal_invalid")
+        if normalized.target_body_part and normalized.target_body_part not in {"胸", "背", "腿", "臀", "肩", "手臂", "核心", "全身"}:
+            errors.append("target_body_part_invalid")
         if normalized.equipment and normalized.equipment not in {"徒手", "弹力带", "哑铃", "健身房器械"}:
             errors.append("equipment_invalid")
         if normalized.time and normalized.time not in {"早上", "午间", "晚上"}:

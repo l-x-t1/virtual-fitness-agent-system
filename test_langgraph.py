@@ -70,7 +70,7 @@ def _run(message: str, user_id: int = 1) -> dict:
 
 def test_scenario1_fat_loss_knee_injury():
     """场景1：我要减脂，膝盖不好 → 规划/推荐/评估(通过)/激励/报告"""
-    result = _run("我要减脂，膝盖不好")
+    result = _run("帮我制定减脂训练计划，膝盖不好，徒手")
 
     # 规划：识别出减脂目标 + 膝盖保护限制
     assert result["task_plan"]["goal"] == "减脂"
@@ -92,7 +92,7 @@ def test_scenario1_fat_loss_knee_injury():
 
 def test_scenario2_chest_no_equipment_retry():
     """场景2：帮我制定练胸计划 → 首次需器械不通过 → 回退重推徒手 → 通过"""
-    result = _run("帮我制定练胸计划")
+    result = _run("帮我推荐练胸动作，增肌")
 
     # 规划：练胸 → 增肌目标
     assert result["task_plan"]["goal"] == "增肌"
@@ -117,7 +117,7 @@ def test_scenario2_chest_no_equipment_retry():
 def test_error_path_state_is_safe():
     """任一节点异常时，run_agent 不抛出，返回友好错误报告。"""
     with patch("agents.RecommendAgent", side_effect=RuntimeError("boom")):
-        result = asyncio.run(run_agent("随便练练", 1))
+        result = asyncio.run(run_agent("帮我推荐练胸动作，增肌", 1))
     # 走到 error_handler，输出友好报告而非崩溃
     assert result["report"]["summary"]
     assert result["current_step"] == "done"

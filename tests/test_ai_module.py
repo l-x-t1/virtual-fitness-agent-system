@@ -108,7 +108,7 @@ def test_long_term_memory_survives_across_sessions_and_users():
     result = coach.chat(
         clean_user,
         [],
-        {"session_id": second["id"], "message": "帮我制定训练计划", "provider": "deepseek", "model": None},
+        {"session_id": second["id"], "message": "帮我制定减脂训练计划，膝盖不好，徒手", "provider": "deepseek", "model": None},
     )
 
     assert result["memory"]["long_term_hits"] >= 1
