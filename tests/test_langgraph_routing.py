@@ -22,6 +22,16 @@ def _state(message: str) -> AgentState:
         "current_step": "planning",
         "next_step": "planning_agent",
         "route": "planning",
+        "control_route": "classification",
+        "intent": "",
+        "sub_intent": "",
+        "intent_confidence": 0.0,
+        "candidate_intents": [],
+        "intent_reason": "",
+        "missing_slots": [],
+        "awaiting_clarification": False,
+        "clarification_count": 0,
+        "conversation_context": {},
         "retry_count": 0,
         "max_retries": 2,
         "error": {},
@@ -33,10 +43,10 @@ def test_graph_compiles_with_start_end_and_conditional_edges():
     graph = workflow.build_graph().get_graph()
     assert "__start__" in graph.nodes
     assert "__end__" in graph.nodes
-    assert any(edge.source == "__start__" and edge.target == "planning_agent" for edge in graph.edges)
+    assert any(edge.source == "__start__" and edge.target == "intent_classification_node" for edge in graph.edges)
     assert any(edge.conditional for edge in graph.edges)
     assert any(
-        edge.conditional and edge.source == "planning_agent" and edge.target == "recommend_agent"
+        edge.conditional and edge.source == "slot_validation_node" and edge.target == "planning_agent"
         for edge in graph.edges
     )
 
@@ -63,9 +73,23 @@ def test_planning_routes_supported_intents(monkeypatch):
         assert workflow.planning_router(update) == expected
 
 
+def test_intent_classification_routes_before_planning():
+    update = workflow.intent_classification_node(_state("帮我推荐个动作"))
+    assert update["intent"] == "recommend_exercise"
+    assert update["control_route"] == "slot_validation"
+    assert update["route"] == "recommend"
+
+    ambiguous = workflow.intent_classification_node(_state("帮我弄个训练"))
+    assert ambiguous["control_route"] == "clarification"
+    assert ambiguous["candidate_intents"] == ["recommend_exercise", "generate_workout"]
+
+
 def test_condition_functions_only_read_state_and_return_routes():
     routers = (
         workflow.planning_router,
+        workflow.classification_router,
+        workflow.slot_validation_router,
+        workflow.clarification_router,
         workflow.graph_router,
         workflow.recommend_router,
         workflow.evaluate_router,
@@ -74,6 +98,7 @@ def test_condition_functions_only_read_state_and_return_routes():
         workflow.retry_router,
     )
     business_names = {
+        "intent_classification_node", "slot_validation_node", "clarification_node",
         "planning_agent", "graphrag_node", "recommend_agent", "evaluate_agent",
         "motivate_agent", "report_agent", "error_handler", "fallback_node",
     }
@@ -90,6 +115,9 @@ def test_condition_functions_only_read_state_and_return_routes():
 def test_business_nodes_do_not_call_each_other_directly():
     nodes = (
         workflow.planning_agent,
+        workflow.intent_classification_node,
+        workflow.slot_validation_node,
+        workflow.clarification_node,
         workflow.graphrag_node,
         workflow.recommend_agent,
         workflow.evaluate_agent,
@@ -116,6 +144,8 @@ def test_state_has_required_fields_and_no_secrets():
         "recommendations", "evaluation", "motivation", "report", "graph_context",
         "retry_count", "max_retries", "error", "fallback_reason",
         "completed_steps", "trace_id", "session_id",
+        "intent", "sub_intent", "intent_confidence", "candidate_intents",
+        "missing_slots", "awaiting_clarification", "clarification_count",
     }
     assert required <= fields
     forbidden_fragments = ("api_key", "apikey", "jwt", "cookie", "password", "secret")

@@ -24,6 +24,14 @@ class AgentState(TypedDict, total=False):
       current_step:    当前执行步骤（planning/recommending/evaluating/motivating/reporting）
       next_step:       兼容旧调用方的下一节点名称
       route:           conditional_edges 使用的显式路由值
+      control_route:   分类/槽位控制流路由（slot_validation/planning/clarification/fallback）
+      intent:          轻量分类得到的细分意图
+      sub_intent:      业务子意图
+      intent_confidence: 分类置信度
+      candidate_intents: 低置信或歧义时的候选意图
+      missing_slots:   当前 intent 仍缺失的关键槽位
+      awaiting_clarification: 是否正在等待用户回答追问
+      clarification_count: 已追问轮数
       graph_context:   GraphRAG 只读检索结果或不可用状态
       tool_results:    环境、姿态或动作库工具的结构化执行结果
       retry_count:     当前重试次数
@@ -38,6 +46,8 @@ class AgentState(TypedDict, total=False):
       slot_state:      当前会话完整槽位上下文
       slots_delta:     当前轮新增或变化的槽位
       slot_status:     complete/clarify/fallback
+      slot_message:    追问或槽位处理提示
+      slot_errors:     槽位校验错误列表
     """
 
     messages: Annotated[list[dict[str, Any]], operator.add]
@@ -52,6 +62,16 @@ class AgentState(TypedDict, total=False):
     current_step: str
     next_step: str
     route: str
+    control_route: str
+    intent: str
+    sub_intent: str
+    intent_confidence: float
+    candidate_intents: list[str]
+    intent_reason: str
+    missing_slots: list[str]
+    awaiting_clarification: bool
+    clarification_count: int
+    conversation_context: dict[str, Any]
     retry_count: int
     max_retries: int
     error: dict[str, Any] | str
@@ -64,3 +84,5 @@ class AgentState(TypedDict, total=False):
     slot_state: dict[str, Any]
     slots_delta: dict[str, Any]
     slot_status: str
+    slot_message: str
+    slot_errors: list[str]

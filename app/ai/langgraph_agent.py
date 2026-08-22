@@ -1,7 +1,8 @@
 """多智能体协作系统（LangGraph 调度层）。
 
 流程由 LangGraph 原生 conditional_edges 根据 AgentState 驱动：
-  START → planning_agent → 业务节点 / GraphRAG 节点 / fallback
+  START → intent_classification → slot_validation / clarification → planning
+  意图明确但缺槽位 → clarification → END，下一轮优先补槽后再回到 planning
   业务节点异常 → error_handler → 有限重试 / fallback → END
 
 使用人员1（工具调用基础层）的 LLMClient.bind_tools 与 RecommendAgent 工具，
@@ -17,6 +18,13 @@ from langgraph.graph import END, START, StateGraph
 from langchain_core.runnables import RunnableConfig
 
 from app.ai.state import AgentState
+from app.ai.intents import (
+    FITNESS_INTENTS,
+    IntentResult,
+    LightweightIntentClassifier,
+    business_route_for_intent,
+    required_slots_for_intent,
+)
 from app.llm.client import LLMClient, LLMConfigurationError
 from app.slots.clarifier import SlotClarifier
 from app.slots.extractor import SlotExtractor
@@ -27,8 +35,10 @@ from app.slots.validator import SlotValidator
 logger = logging.getLogger(__name__)
 
 MAX_RETRY = 2  # 兼容旧常量名；State 中可通过 max_retries 覆盖
+MAX_CLARIFICATION_ROUNDS = 2
 
 BusinessRoute = Literal["recommend", "evaluate", "motivate", "report", "graphrag", "tools", "fallback"]
+ControlRoute = Literal["slot_validation", "planning", "clarification", "fallback"]
 
 
 # ============================================================
@@ -106,20 +116,37 @@ def _load_user_info(user_id: int) -> dict[str, Any]:
 
 
 def _prepare_slots(user_id: int | str, session_id: str, message: str) -> dict[str, Any]:
-    """Extract, merge and validate slots before any business agent runs."""
+    """Extract and merge slots before graph-level intent-specific validation."""
     user_id = int(user_id)
     previous = default_slot_store.get(user_id, session_id)
     delta = SlotExtractor().extract(message, state=previous)
     current = default_slot_store.merge(user_id, session_id, delta)
-    validation = SlotValidator().validate(current)
-    decision = SlotClarifier().decide(validation.state)
     return {
-        "slot_state": decision.state.model_dump(mode="json"),
+        "slot_state": current.model_dump(mode="json"),
         "slots_delta": delta,
-        "slot_status": decision.action,
-        "slot_message": decision.message,
-        "slot_errors": validation.errors,
+        "slot_status": "merged",
+        "slot_message": "",
+        "slot_errors": [],
     }
+
+
+def _persist_slot_state(state: AgentState, slot_state: SlotState) -> None:
+    """Best-effort persistence for cross-turn clarification state."""
+    user_id = (state.get("user_info") or {}).get("id")
+    session_id = state.get("session_id")
+    if user_id is None or not session_id:
+        return
+    try:
+        default_slot_store.set(int(user_id), str(session_id), slot_state)
+    except Exception as exc:  # pragma: no cover - Redis/local store failures should not break graph tests
+        logger.warning("persist slot state failed: %s", exc)
+
+
+def _slot_state_from_graph(state: AgentState) -> SlotState:
+    payload = state.get("slot_state") or {}
+    if isinstance(payload, SlotState):
+        return payload
+    return SlotState(**payload)
 
 
 # ============================================================
@@ -182,9 +209,13 @@ def _extract_constraints(user_info: dict[str, Any], message: str) -> list[str]:
 def _classify_request(message: str) -> BusinessRoute:
     """确定性意图路由；只决定下一节点，不执行业务逻辑。"""
     text = (message or "").strip()
+    venue_query = (
+        any(k in text for k in ("场馆", "哪里练", "运动场"))
+        or ("健身房" in text and any(k in text for k in ("附近", "哪里", "在哪", "找", "推荐", "位置", "地址")))
+    )
     if (
         ("天气" in text and any(k in text for k in ("查", "查询", "怎么样", "如何", "适合", "能不能", "可以")))
-        or any(k in text for k in ("场馆", "健身房", "哪里练", "运动场"))
+        or venue_query
         or any(k in text for k in ("MediaPipe", "mediapipe", "关键点"))
         or any(k in text for k in ("动作库", "动作列表", "新增动作", "修改动作", "删除动作"))
     ):
@@ -208,6 +239,190 @@ def _classify_request(message: str) -> BusinessRoute:
     return "fallback"
 
 
+@_safe_step("intent_classification_node")
+def intent_classification_node(state: AgentState, config: RunnableConfig | None = None) -> dict[str, Any]:
+    """Lightweight rule/model intent classification before planning."""
+    user_message = _last_user_message(state)
+    slot_state = _slot_state_from_graph(state)
+    classifier = LightweightIntentClassifier()
+
+    if slot_state.awaiting_clarification:
+        if "intent" in slot_state.missing_required or slot_state.intent == "ambiguous":
+            result = classifier.resolve_clarification(user_message, slot_state.candidate_intents)
+        else:
+            result = classifier.resolve_clarification(user_message, slot_state.candidate_intents) if not slot_state.intent else None
+            if result is None or result.intent not in slot_state.candidate_intents:
+                result = IntentResult(
+                    intent=slot_state.intent or "unknown",
+                    confidence=slot_state.intent_confidence or 0.8,
+                    sub_intent=slot_state.sub_intent or "",
+                    candidate_intents=list(slot_state.candidate_intents),
+                    reason="awaiting_clarification",
+                )
+    else:
+        result = classifier.classify(user_message)
+
+    slot_state.intent = result.intent
+    slot_state.sub_intent = result.sub_intent
+    slot_state.intent_confidence = result.confidence
+    slot_state.candidate_intents = list(result.candidate_intents)
+    slot_state.intent_reason = result.reason
+
+    if result.ambiguous:
+        slot_state.awaiting_clarification = True
+        slot_state.missing_required = ["intent"]
+        control_route: ControlRoute = "clarification"
+        business_route = "clarification"
+    elif result.known:
+        business_route = business_route_for_intent(result.intent)
+        if result.intent in FITNESS_INTENTS:
+            control_route = "slot_validation"
+        else:
+            slot_state.awaiting_clarification = False
+            slot_state.missing_required = []
+            control_route = "planning"
+    else:
+        business_route = "fallback"
+        control_route = "fallback"
+
+    _persist_slot_state(state, slot_state)
+    return {
+        "intent": result.intent,
+        "sub_intent": result.sub_intent,
+        "intent_confidence": result.confidence,
+        "candidate_intents": list(result.candidate_intents),
+        "intent_reason": result.reason,
+        "slot_state": slot_state.model_dump(mode="json"),
+        "missing_slots": list(slot_state.missing_required),
+        "awaiting_clarification": slot_state.awaiting_clarification,
+        "clarification_count": slot_state.clarifying_rounds,
+        "conversation_context": slot_state.conversation_context,
+        "current_step": "classified",
+        "next_step": control_route,
+        "route": business_route,
+        "control_route": control_route,
+        "fallback_reason": "unsupported_intent" if control_route == "fallback" else "",
+    }
+
+
+@_safe_step("slot_validation_node")
+def slot_validation_node(state: AgentState, config: RunnableConfig | None = None) -> dict[str, Any]:
+    """Validate intent-specific required slots before planner execution."""
+    slot_state = _slot_state_from_graph(state)
+    intent = state.get("intent") or slot_state.intent or ""
+    required_slots = required_slots_for_intent(intent)
+    validation = SlotValidator().validate(slot_state, required_slots=required_slots)
+    current = validation.state
+    current.intent = intent
+    current.sub_intent = state.get("sub_intent") or current.sub_intent
+    current.intent_confidence = float(state.get("intent_confidence") or current.intent_confidence or 0.0)
+    current.candidate_intents = list(state.get("candidate_intents") or current.candidate_intents)
+    current.intent_reason = state.get("intent_reason") or current.intent_reason
+    current.set_missing_required(required_slots)
+    business_route = business_route_for_intent(intent)
+
+    if not current.missing_required:
+        current.awaiting_clarification = False
+        current.clarified = True
+        control_route: ControlRoute = "planning"
+        slot_status = "complete"
+        slot_message = ""
+        fallback_reason = ""
+    else:
+        current.awaiting_clarification = True
+        control_route = "clarification"
+        slot_status = "clarify"
+        slot_message = ""
+        fallback_reason = ""
+
+    _persist_slot_state(state, current)
+    return {
+        "slot_state": current.model_dump(mode="json"),
+        "missing_slots": list(current.missing_required),
+        "slot_status": slot_status,
+        "slot_message": slot_message,
+        "slot_errors": validation.errors,
+        "awaiting_clarification": current.awaiting_clarification,
+        "clarification_count": current.clarifying_rounds,
+        "conversation_context": current.conversation_context,
+        "current_step": "slot_validated",
+        "next_step": control_route,
+        "route": business_route if control_route == "planning" else "clarification",
+        "control_route": control_route,
+        "fallback_reason": fallback_reason,
+    }
+
+
+@_safe_step("clarification_node")
+def clarification_node(state: AgentState, config: RunnableConfig | None = None) -> dict[str, Any]:
+    """Ask focused follow-up questions and wait for the next user turn."""
+    slot_state = _slot_state_from_graph(state)
+    if "intent" in slot_state.missing_required or slot_state.intent == "ambiguous":
+        slot_state.clarifying_rounds += 1
+        slot_state.awaiting_clarification = True
+        message = "你是想让我推荐一个具体动作，还是直接给你安排一套训练？"
+        action = "clarify"
+        if slot_state.clarifying_rounds > MAX_CLARIFICATION_ROUNDS:
+            slot_state.awaiting_clarification = False
+            message = "我还是没法确认你想要单个动作还是完整训练计划，将先进入安全兜底。"
+            action = "fallback"
+    else:
+        required_slots = required_slots_for_intent(slot_state.intent or str(state.get("intent") or ""))
+        decision = SlotClarifier(max_rounds=MAX_CLARIFICATION_ROUNDS).decide(
+            slot_state,
+            required_slots=required_slots,
+        )
+        slot_state = decision.state
+        message = decision.message
+        action = decision.action
+
+    _persist_slot_state(state, slot_state)
+    if action == "fallback":
+        return {
+            "report": {
+                "summary": message,
+                "plan": [],
+                "expected": "",
+                "motivation": "我会尽量基于已有信息处理，但关键条件仍不完整。",
+                "fallback": True,
+                "fallback_reason": "clarification_exhausted",
+            },
+            "slot_state": slot_state.model_dump(mode="json"),
+            "slot_status": "fallback",
+            "slot_message": message,
+            "missing_slots": list(slot_state.missing_required),
+            "awaiting_clarification": slot_state.awaiting_clarification,
+            "clarification_count": slot_state.clarifying_rounds,
+            "conversation_context": slot_state.conversation_context,
+            "current_step": "fallback",
+            "next_step": "fallback_node",
+            "route": "fallback",
+            "control_route": "fallback",
+            "fallback_reason": "clarification_exhausted",
+        }
+    return {
+        "report": {
+            "summary": message,
+            "plan": [],
+            "expected": "",
+            "motivation": "",
+            "clarification": True,
+        },
+        "messages": [{"role": "assistant", "content": message, "agent": "clarification_node"}],
+        "slot_state": slot_state.model_dump(mode="json"),
+        "slot_status": "clarify",
+        "slot_message": message,
+        "missing_slots": list(slot_state.missing_required),
+        "awaiting_clarification": slot_state.awaiting_clarification,
+        "clarification_count": slot_state.clarifying_rounds,
+        "conversation_context": slot_state.conversation_context,
+        "current_step": "clarifying",
+        "next_step": "__end__",
+        "route": "end",
+        "control_route": "end",
+    }
+
+
 @_safe_step("planning_agent")
 def planning_agent(state: AgentState, config: RunnableConfig | None = None) -> dict[str, Any]:
     messages = state.get("messages") or []
@@ -227,7 +442,12 @@ def planning_agent(state: AgentState, config: RunnableConfig | None = None) -> d
             "constraints": _extract_constraints(user_info, user_message),
         }
 
-    route = _classify_request(user_message)
+    state_route = state.get("route")
+    route = (
+        state_route
+        if state_route in {"recommend", "evaluate", "motivate", "report", "graphrag", "tools", "fallback"}
+        else _classify_request(user_message)
+    )
     node_by_route = {
         "recommend": "recommend_agent",
         "evaluate": "evaluate_agent",
@@ -667,12 +887,14 @@ def error_handler(state: AgentState, config: RunnableConfig | None = None) -> di
 
 def fallback_node(state: AgentState, config: RunnableConfig | None = None) -> dict[str, Any]:
     reason = state.get("fallback_reason") or "unsupported_intent"
+    missing = state.get("missing_slots") or (_slot_state_from_graph(state).missing_required if state.get("slot_state") else [])
+    missing_text = f"还缺少：{'、'.join(missing)}。" if missing else ""
     return {
         "report": {
-            "summary": "当前请求已进入安全降级流程，请补充明确的训练目标或稍后重试。",
+            "summary": f"我暂时无法把这句话稳定映射到可执行的健身任务。{missing_text}你可以换一种说法告诉我想推荐动作、安排训练、评估姿势还是查询知识。",
             "plan": [],
             "expected": "",
-            "motivation": "别担心，我们可以重新规划。",
+            "motivation": "别担心，我们可以继续把信息补齐后再规划。",
             "fallback": True,
             "fallback_reason": reason,
         },
@@ -687,6 +909,23 @@ def fallback_node(state: AgentState, config: RunnableConfig | None = None) -> di
 # ============================================================
 # 构建流程图
 # ============================================================
+
+def classification_router(state: AgentState) -> str:
+    route = state.get("control_route") or "fallback"
+    return route if route in {"slot_validation", "planning", "clarification", "fallback"} else "fallback"
+
+
+def slot_validation_router(state: AgentState) -> str:
+    route = state.get("control_route") or "fallback"
+    return route if route in {"planning", "clarification", "fallback"} else "fallback"
+
+
+def clarification_router(state: AgentState) -> str:
+    if state.get("error"):
+        return "error"
+    route = state.get("control_route") or "end"
+    return route if route in {"end", "fallback"} else "end"
+
 
 def planning_router(state: AgentState) -> str:
     route = state.get("route") or "fallback"
@@ -732,6 +971,9 @@ def retry_router(state: AgentState) -> str:
 def build_graph():
     graph = StateGraph(AgentState)
 
+    graph.add_node("intent_classification_node", intent_classification_node)
+    graph.add_node("slot_validation_node", slot_validation_node)
+    graph.add_node("clarification_node", clarification_node)
     graph.add_node("planning_agent", planning_agent)
     graph.add_node("graphrag_node", graphrag_node)
     graph.add_node("tool_agent", tool_agent)
@@ -742,7 +984,22 @@ def build_graph():
     graph.add_node("error_handler", error_handler)
     graph.add_node("fallback_node", fallback_node)
 
-    graph.add_edge(START, "planning_agent")
+    graph.add_edge(START, "intent_classification_node")
+
+    graph.add_conditional_edges("intent_classification_node", classification_router, {
+        "slot_validation": "slot_validation_node",
+        "planning": "planning_agent",
+        "clarification": "clarification_node",
+        "fallback": "fallback_node",
+    })
+    graph.add_conditional_edges("slot_validation_node", slot_validation_router, {
+        "planning": "planning_agent",
+        "clarification": "clarification_node",
+        "fallback": "fallback_node",
+    })
+    graph.add_conditional_edges("clarification_node", clarification_router, {
+        "end": END, "fallback": "fallback_node", "error": "error_handler",
+    })
 
     graph.add_conditional_edges("planning_agent", planning_router, {
         "recommend": "recommend_agent", "evaluate": "evaluate_agent",
@@ -800,7 +1057,8 @@ async def run_agent(user_message: str, user_id: int | str) -> dict[str, Any]:
     user_info = _load_user_info(user_id)
     session_id = f"workflow:{user_id}"
     slot_context = _prepare_slots(user_id, session_id, user_message)
-    user_info = {**user_info, "slot_state": slot_context["slot_state"]}
+    user_info = {"id": int(user_id), **user_info, "slot_state": slot_context["slot_state"]}
+    slot_state = SlotState(**slot_context["slot_state"])
 
     initial: AgentState = {
         "messages": [{"role": "user", "content": user_message}],
@@ -815,6 +1073,16 @@ async def run_agent(user_message: str, user_id: int | str) -> dict[str, Any]:
         "current_step": "planning",
         "next_step": "planning_agent",
         "route": "planning",
+        "control_route": "classification",
+        "intent": slot_state.intent or "",
+        "sub_intent": slot_state.sub_intent or "",
+        "intent_confidence": slot_state.intent_confidence,
+        "candidate_intents": list(slot_state.candidate_intents),
+        "intent_reason": slot_state.intent_reason or "",
+        "missing_slots": list(slot_state.missing_required),
+        "awaiting_clarification": slot_state.awaiting_clarification,
+        "clarification_count": slot_state.clarifying_rounds,
+        "conversation_context": slot_state.conversation_context,
         "retry_count": 0,
         "max_retries": MAX_RETRY,
         "error": {},

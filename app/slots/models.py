@@ -26,6 +26,7 @@ class SlotState(BaseModel):
     """Cross-turn slot tree stored in Redis and mirrored into conversation state."""
 
     goal: str | None = None
+    target_body_part: str | None = None
     injuries: list[str] = Field(default_factory=list)
     equipment: str | None = None
     time: str | None = None
@@ -33,6 +34,13 @@ class SlotState(BaseModel):
     missing_required: list[str] = Field(default_factory=list)
     clarifying_rounds: int = 0
     clarified: bool = False
+    awaiting_clarification: bool = False
+    intent: str | None = None
+    sub_intent: str | None = None
+    intent_confidence: float = 0.0
+    candidate_intents: list[str] = Field(default_factory=list)
+    intent_reason: str | None = None
+    conversation_context: dict[str, Any] = Field(default_factory=dict)
     source_turn_id: str | None = None
     updated_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
 
@@ -42,10 +50,14 @@ class SlotState(BaseModel):
             self.injuries = [self.injuries]
         self.injuries = self._normalize_injuries(self.injuries)
         self.goal = self._normalize_goal(self.goal)
+        self.target_body_part = self._normalize_body_part(self.target_body_part)
         self.equipment = self._normalize_equipment(self.equipment)
         self.time = self._normalize_time(self.time)
         self.location = self._normalize_location(self.location)
-        self.missing_required = [item for item in self.missing_required if item in {"goal", "injuries"}]
+        allowed_missing = {"intent", "goal", "target_body_part", "injuries", "equipment", "time", "location"}
+        self.missing_required = [item for item in self.missing_required if item in allowed_missing]
+        self.candidate_intents = [str(item) for item in self.candidate_intents if item]
+        self.intent_confidence = max(0.0, min(1.0, float(self.intent_confidence or 0.0)))
         self.updated_at = self.updated_at if isinstance(self.updated_at, datetime) else datetime.now(timezone.utc)
         return self
 
@@ -55,7 +67,7 @@ class SlotState(BaseModel):
 
     @staticmethod
     def slot_names() -> tuple[str, ...]:
-        return ("goal", "injuries", "equipment", "time", "location")
+        return ("goal", "target_body_part", "injuries", "equipment", "time", "location")
 
     def as_dict(self) -> dict[str, Any]:
         return self.model_dump()
@@ -73,20 +85,29 @@ class SlotState(BaseModel):
         payload["updated_at"] = datetime.now(timezone.utc)
         return SlotState(**payload)
 
-    def missing_required_slots(self) -> list[str]:
+    def missing_required_slots(self, required_slots: list[str] | tuple[str, ...] | None = None) -> list[str]:
+        required = tuple(required_slots) if required_slots is not None else self.required_keys()
         missing = []
-        if not self.goal:
+        if "goal" in required and not self.goal:
             missing.append("goal")
-        if not self.injuries:
+        if "target_body_part" in required and not self.target_body_part:
+            missing.append("target_body_part")
+        if "injuries" in required and not self.injuries:
             missing.append("injuries")
+        if "equipment" in required and not self.equipment:
+            missing.append("equipment")
+        if "time" in required and not self.time:
+            missing.append("time")
+        if "location" in required and not self.location:
+            missing.append("location")
         return missing
 
-    def set_missing_required(self) -> "SlotState":
-        self.missing_required = self.missing_required_slots()
+    def set_missing_required(self, required_slots: list[str] | tuple[str, ...] | None = None) -> "SlotState":
+        self.missing_required = self.missing_required_slots(required_slots)
         return self
 
-    def complete(self) -> bool:
-        return not self.missing_required_slots()
+    def complete(self, required_slots: list[str] | tuple[str, ...] | None = None) -> bool:
+        return not self.missing_required_slots(required_slots)
 
     @staticmethod
     def _merge_injuries(current: Any, incoming: Any) -> list[str]:
@@ -118,6 +139,33 @@ class SlotState(BaseModel):
         }
         text = aliases.get(text, text)
         return text if text in {"减脂", "增肌", "塑形", "康复", "综合"} else None
+
+    @staticmethod
+    def _normalize_body_part(value: Any) -> str | None:
+        text = str(value or "").strip()
+        aliases = {
+            "胸": "胸",
+            "胸部": "胸",
+            "练胸": "胸",
+            "背": "背",
+            "背部": "背",
+            "腿": "腿",
+            "腿部": "腿",
+            "臀": "臀",
+            "臀部": "臀",
+            "肩": "肩",
+            "肩部": "肩",
+            "手臂": "手臂",
+            "胳膊": "手臂",
+            "核心": "核心",
+            "腹": "核心",
+            "腹部": "核心",
+            "全身": "全身",
+        }
+        for needle, mapped in aliases.items():
+            if needle in text:
+                return mapped
+        return text if text in {"胸", "背", "腿", "臀", "肩", "手臂", "核心", "全身"} else None
 
     @staticmethod
     def _normalize_injuries(values: Any) -> list[str]:
