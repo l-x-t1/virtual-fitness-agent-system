@@ -12,6 +12,11 @@ from app.ai.schemas import TrainingPlan, UserProfile
 from app.agents.output_parser import OutputParser
 from app.llm import LLMClient, LLMError
 from app.observability import get_tracer
+from app.slots.clarifier import SlotClarifier
+from app.slots.archiver import SlotArchiver
+from app.slots.extractor import SlotExtractor
+from app.slots.state import default_slot_store
+from app.slots.validator import SlotValidator
 
 
 class AICoach:
@@ -26,6 +31,7 @@ class AICoach:
             tracer=self.tracer,
         )
         self.parser = OutputParser()
+        self.slot_archiver = SlotArchiver(memory_store=self.memory)
 
     def status(self) -> dict:
         providers = self.llm.available()
@@ -69,6 +75,11 @@ class AICoach:
         if not session:
             raise ValueError("AI 会话不存在或已过期")
         question = data["message"].strip()
+        previous_slots = default_slot_store.get(user["id"], session.id)
+        slots_delta = SlotExtractor(self.llm).extract(question, history=history, state=previous_slots)
+        slot_state = default_slot_store.merge(user["id"], session.id, slots_delta)
+        slot_validation = SlotValidator().validate(slot_state)
+        slot_decision = SlotClarifier().decide(slot_validation.state)
         trace = trace or self.tracer.start_trace(
             "ai_chat",
             session_id=session.id,
@@ -112,6 +123,11 @@ class AICoach:
             "trace": trace,
             "user": user,
             "history": history,
+            "slot_state": slot_decision.state,
+            "slot_previous": previous_slots,
+            "slots_delta": slots_delta,
+            "slot_status": slot_decision.action,
+            "slot_message": slot_decision.message,
         }
 
     def complete_chat(
@@ -137,6 +153,10 @@ class AICoach:
             finish_trace=False,
         )
         answer = rag_result.answer
+        if prepared.get("slot_status") == "clarify":
+            answer = prepared["slot_message"]
+        elif prepared.get("slot_status") == "fallback":
+            answer = f"{prepared['slot_message']} {answer}"
         mode = "online" if rag_result.mode == "online" else "demo"
         self.memory.add(session, "user", question)
         self.memory.add(session, "assistant", answer)
@@ -162,6 +182,12 @@ class AICoach:
                 provider=data.get("provider"),
                 model=data.get("model"),
             )
+        slot_archive = self.slot_archiver.archive(
+            user_id=prepared["user"]["id"],
+            session_id=session.id,
+            previous=prepared.get("slot_previous"),
+            current=prepared["slot_state"],
+        )
         result = {
             "session_id": session.id,
             "answer": answer,
@@ -176,12 +202,16 @@ class AICoach:
                 "rerank_mode": rag_result.rerank_mode,
             },
             "state": dict(session.state),
+            "slot_state": prepared["slot_state"].model_dump(mode="json"),
+            "slots_delta": prepared["slots_delta"],
+            "slot_status": prepared["slot_status"],
             "memory": {
                 "short_term_messages": len(memory_context.short_term_messages),
                 "long_term_hits": len(memory_context.long_term_memories),
                 "summary_hits": len(memory_context.summary_memories),
                 "long_term_saved": memory_update["long_term_saved"],
                 "summary_updated": memory_update["summary_updated"],
+                "slot_long_term_saved": slot_archive.saved,
             },
         }
         trace.finish({"mode": mode, "source_count": len(rag_result.sources)})

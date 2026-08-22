@@ -35,6 +35,9 @@ class AgentState(TypedDict, total=False):
       completed_steps: 已完成节点（追加式累积）
       trace_id:        可选可观测链路 ID
       session_id:      可选会话 ID
+      slot_state:      当前会话完整槽位上下文
+      slots_delta:     当前轮新增或变化的槽位
+      slot_status:     complete/clarify/fallback
     """
 
     messages: Annotated[list[dict[str, Any]], operator.add]
@@ -58,3 +61,6 @@ class AgentState(TypedDict, total=False):
     completed_steps: Annotated[list[str], operator.add]
     trace_id: str
     session_id: str
+    slot_state: dict[str, Any]
+    slots_delta: dict[str, Any]
+    slot_status: str

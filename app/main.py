@@ -18,6 +18,7 @@ from app.core.exceptions import AppError
 from app.core.logging_config import setup_logging
 from app.middleware.rate_limit import RateLimitMiddleware
 from app.middleware.feature_flag import FeatureFlagMiddleware
+from app.slots.middleware import setup_slot_middleware
 from app.services import fitness_service
 from database import init_db
 
@@ -59,6 +60,7 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
 )
+setup_slot_middleware(app)
 app.add_middleware(
     RateLimitMiddleware,
     redis_url=settings.redis_url,

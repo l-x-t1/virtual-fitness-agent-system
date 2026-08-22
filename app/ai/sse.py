@@ -200,6 +200,10 @@ class AIStreamOrchestrator:
                 "next_step": "planning_agent",
                 "retry_count": 0,
                 "error": "",
+                "session_id": prepared["session"].id,
+                "slot_state": prepared.get("slot_state") or {},
+                "slots_delta": prepared.get("slots_delta") or {},
+                "slot_status": prepared.get("slot_status") or "complete",
             }
             async for update in graph.astream(initial, stream_mode="updates"):
                 for node_name, node_output in (update or {}).items():

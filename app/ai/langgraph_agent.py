@@ -18,6 +18,11 @@ from langchain_core.runnables import RunnableConfig
 
 from app.ai.state import AgentState
 from app.llm.client import LLMClient, LLMConfigurationError
+from app.slots.clarifier import SlotClarifier
+from app.slots.extractor import SlotExtractor
+from app.slots.models import SlotState
+from app.slots.state import default_slot_store
+from app.slots.validator import SlotValidator
 
 logger = logging.getLogger(__name__)
 
@@ -98,6 +103,23 @@ def _load_user_info(user_id: int) -> dict[str, Any]:
     except Exception as exc:  # pragma: no cover - 数据库不可用时兜底
         logger.warning("load user failed: %s", exc)
         return {}
+
+
+def _prepare_slots(user_id: int | str, session_id: str, message: str) -> dict[str, Any]:
+    """Extract, merge and validate slots before any business agent runs."""
+    user_id = int(user_id)
+    previous = default_slot_store.get(user_id, session_id)
+    delta = SlotExtractor().extract(message, state=previous)
+    current = default_slot_store.merge(user_id, session_id, delta)
+    validation = SlotValidator().validate(current)
+    decision = SlotClarifier().decide(validation.state)
+    return {
+        "slot_state": decision.state.model_dump(mode="json"),
+        "slots_delta": delta,
+        "slot_status": decision.action,
+        "slot_message": decision.message,
+        "slot_errors": validation.errors,
+    }
 
 
 # ============================================================
@@ -374,6 +396,11 @@ def recommend_agent(state: AgentState, config: RunnableConfig | None = None) -> 
             recommendations = result.get("exercises") or result.get("recommendations") or []
         except Exception as exc:  # pragma: no cover
             raise RuntimeError("recommendation unavailable") from exc
+
+    # Slot constraints are authoritative even when the legacy agent returns a risky action.
+    from app.slots.validator import SlotValidator
+    slot_state = SlotState(**(state.get("slot_state") or {}))
+    recommendations = SlotValidator().resolve_exercises(recommendations, slot_state)
 
     # 将推荐结果追加到消息历史
     msg = {
@@ -771,6 +798,9 @@ async def run_agent(user_message: str, user_id: int | str) -> dict[str, Any]:
         user_id: 用户ID，用于加载画像
     """
     user_info = _load_user_info(user_id)
+    session_id = f"workflow:{user_id}"
+    slot_context = _prepare_slots(user_id, session_id, user_message)
+    user_info = {**user_info, "slot_state": slot_context["slot_state"]}
 
     initial: AgentState = {
         "messages": [{"role": "user", "content": user_message}],
@@ -792,6 +822,8 @@ async def run_agent(user_message: str, user_id: int | str) -> dict[str, Any]:
         "retryable": False,
         "fallback_reason": "",
         "completed_steps": [],
+        "session_id": session_id,
+        **slot_context,
     }
 
     result = await compiled_graph.ainvoke(initial)
