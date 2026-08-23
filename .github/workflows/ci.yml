@@ -55,12 +55,12 @@ jobs:
           python -m pytest tests/ -v --tb=short -x
 
   # ============================================================
-  # 构建 Docker 镜像（仅 main 分支）
+  # 构建 Docker 镜像
   # ============================================================
   build:
     runs-on: ubuntu-latest
     needs: test
-    if: github.ref == 'refs/heads/main' || github.ref == 'refs/heads/master'
+    if: github.event_name == 'pull_request' || github.ref == 'refs/heads/main' || github.ref == 'refs/heads/master'
     steps:
       - uses: actions/checkout@v4
 
@@ -73,5 +73,3 @@ jobs:
           context: .
           push: false
           tags: fitness-app:latest
-          cache-from: type=gha
-          cache-to: type=gha,mode=min
