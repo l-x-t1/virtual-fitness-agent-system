@@ -1,8 +1,16 @@
 .env
 *.db
+data/chroma/
+tests/
+docs/
+.github/
+.idea/
+.agents/
+.codex/
 __pycache__/
 *.pyc
-server*.log
+*.log
 .git/
 .pytest_cache/
+.pytest-tmp/
 *.egg-info/
