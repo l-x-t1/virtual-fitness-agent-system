@@ -13,6 +13,17 @@
 - 管理端用于查看运营数据、管理用户、课程、场馆、器材和知识图谱。
 - OpenAPI/Swagger 接口文档、训练 WebSocket 和健康检查接口。
 
+## 技术栈
+
+| 层次 | 技术 |
+| --- | --- |
+| 后端 API | Python 3.12、FastAPI、Pydantic、Uvicorn |
+| 前端 | HTML、CSS、原生 JavaScript；Leaflet 地图；浏览器 MediaPipe Pose |
+| 数据与认证 | SQLAlchemy、SQLite（本地默认）/ PostgreSQL、JWT（PyJWT）、bcrypt |
+| 智能体与检索 | LangChain、LangGraph、Chroma、Sentence Transformers、BM25；可选 Neo4j GraphRAG |
+| 缓存与观测 | 可选 Redis、Langfuse / LangSmith |
+| 部署与测试 | Docker、Docker Compose、Nginx、pytest |
+
 ## 界面预览
 
 | 首页 | 体感训练关卡 |
