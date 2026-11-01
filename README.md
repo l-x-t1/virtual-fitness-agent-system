@@ -13,6 +13,20 @@
 - 管理端用于查看运营数据、管理用户、课程、场馆、器材和知识图谱。
 - OpenAPI/Swagger 接口文档、训练 WebSocket 和健康检查接口。
 
+## 界面预览
+
+| 首页 | 体感训练关卡 |
+| --- | --- |
+| ![FitFlow 系统首页](docs/images/home-dashboard.png) | ![体感训练关卡选择](docs/images/training-levels.png) |
+
+| 用户画像与 AI 推荐 | 场馆地图与推荐 |
+| --- | --- |
+| ![用户画像及 AI 推荐结果](docs/images/user-profile-recommendations.png) | ![场馆推荐和周边地图](docs/images/venue-recommendations.png) |
+
+AI 对话教练：
+
+![AI 对话教练页面](docs/images/ai-coach.png)
+
 ## 环境要求
 
 - Python 3.12（Docker 镜像使用 Python 3.12）。
